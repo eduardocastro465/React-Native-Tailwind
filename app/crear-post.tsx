@@ -21,6 +21,7 @@ import {
     XMarkIcon,
 } from 'react-native-heroicons/outline';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import { environment } from './environments/environment';
 
 // --- INTERFACES ---
 interface PostFormData {
@@ -34,10 +35,7 @@ interface PostFormData {
 
 // --- CONFIG ---
 const USUARIA_ID = '67daf8baf4ed8050c7b7269a';
-
-const API_URL = Platform.OS === 'web' 
-  ? 'http://localhost:4000/api/v1/posts'
-  : 'http://192.168.0.107:4000/api/v1/posts ';
+const API_URL = environment.api+'/posts';
 
 const ETIQUETAS = ['propio', 'comprado', 'rentado'];
 const COLECCIONES_PREDEFINIDAS = ['Verano', 'Invierno', 'Ocasiones', 'Trabajo', 'Casual'];
@@ -46,22 +44,35 @@ const MAX_IMAGENES = 10;
 // PERMISOS
 const requestPermission = async (type: 'camera' | 'gallery'): Promise<boolean> => {
   if (Platform.OS === 'web' || Platform.OS === 'ios') return true;
-  if (Platform.OS === 'android') {
-    try {
-      const permissionType =
-        type === 'camera'
-          ? PermissionsAndroid.PERMISSIONS.CAMERA
-          : Platform.Version >= 33
-            ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
-            : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
-      const result = await PermissionsAndroid.request(permissionType);
-      return result === PermissionsAndroid.RESULTS.GRANTED;
-    } catch {
+
+  try {
+    let permission;
+    if (type === 'camera') {
+      permission = PermissionsAndroid.PERMISSIONS.CAMERA;
+    } else {
+      permission =
+        Platform.Version >= 33
+          ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+          : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+    }
+
+    const granted = await PermissionsAndroid.request(permission);
+
+    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+      Alert.alert(
+        "Permiso requerido",
+        `Necesitamos acceso a la ${type === 'camera' ? 'cámara' : 'galería'} para continuar.`
+      );
       return false;
     }
+
+    return true;
+
+  } catch (err) {
+    return false;
   }
-  return true;
 };
+
 
 // FUNCION SENCILLA - SIN React.FC
 export default function CrearPostScreen() {
@@ -96,13 +107,9 @@ export default function CrearPostScreen() {
       return;
     }
 
-    if (Platform.OS === 'android') {
-      const hasPermission = await requestPermission(type);
-      if (!hasPermission) {
-        Alert.alert('Permiso denegado', `No tienes permiso para acceder a ${type === 'camera' ? 'la cámara' : 'la galería'}.`);
-        return;
-      }
-    }
+    // --- PERMISOS ANDROID ---
+    const hasPermission = await requestPermission(type);
+    if (!hasPermission) return;
 
     const options = {
       mediaType: 'photo' as const,
@@ -117,13 +124,17 @@ export default function CrearPostScreen() {
       : await launchCamera(options);
 
     if (result.didCancel) return;
-    if (result.errorCode) return Alert.alert('Error', result.errorMessage || 'Error al cargar imagen.');
+    if (result.errorCode)
+      return Alert.alert('Error', result.errorMessage || 'Error al cargar imagen.');
 
     if (result.assets?.length > 0) {
-      const uris = result.assets.map(a => a.uri).filter(Boolean) as string[];
-      setFormData(prev => ({
+      const uris = result.assets.map((a) => a.uri).filter(Boolean) as string[];
+      setFormData((prev) => ({
         ...prev,
-        imagenesUris: [...prev.imagenesUris, ...uris.slice(0, MAX_IMAGENES - prev.imagenesUris.length)]
+        imagenesUris: [
+          ...prev.imagenesUris,
+          ...uris.slice(0, MAX_IMAGENES - prev.imagenesUris.length),
+        ],
       }));
     }
   }, [formData.imagenesUris]);
@@ -176,10 +187,9 @@ export default function CrearPostScreen() {
     }));
   };
 
-  // SUBMIT - Versión UNIVERSAL
   const handleSubmit = async () => {
-    const imagenesParaEnviar = Platform.OS === 'web' 
-      ? selectedFiles 
+    const imagenesParaEnviar = Platform.OS === 'web'
+      ? selectedFiles
       : formData.imagenesUris;
 
     if (!imagenesParaEnviar?.length) {
@@ -192,7 +202,6 @@ export default function CrearPostScreen() {
     try {
       const fd = new FormData();
 
-      // ID HARDCODEADO
       fd.append("usuariaId", USUARIA_ID);
       fd.append("descripcion", formData.descripcion);
       fd.append("etiqueta", formData.etiqueta);
@@ -200,27 +209,24 @@ export default function CrearPostScreen() {
       fd.append("collections", JSON.stringify(formData.collections));
       fd.append("shoppingLinks", JSON.stringify(formData.shoppingLinks));
 
-      // Imágenes según plataforma
       if (Platform.OS === 'web') {
         selectedFiles.forEach(file => fd.append("imagenes", file));
       } else {
         formData.imagenesUris.forEach((uri, index) => {
           if (!uri) return;
+
           let finalUri = uri;
           if (Platform.OS === 'ios' && !uri.startsWith('file://')) {
             finalUri = `file://${uri}`;
           }
+
           fd.append("imagenes", {
             uri: finalUri,
             name: `img_${Date.now()}_${index}.jpg`,
             type: "image/jpeg",
-          });
+          } as any);
         });
       }
-
-      console.log("=== Enviando FormData ===");
-      console.log("URL:", API_URL);
-      console.log("usuariaId:", USUARIA_ID);
 
       const res = await fetch(API_URL, {
         method: "POST",
@@ -228,27 +234,25 @@ export default function CrearPostScreen() {
       });
 
       const json = await res.json();
-      console.log("✅ Respuesta:", json);
 
       if (!res.ok) {
-        Alert.alert("Error del servidor", json.error || "Error al publicar");
+        Alert.alert("Error", json.error || "Error al publicar");
       } else {
         Alert.alert("Éxito", "Look publicado correctamente");
         router.back();
       }
-    } catch (err) {
-      console.error("💥 Error:", err);
-      Alert.alert("Error", `No se pudo publicar: ${err.message}`);
+    } catch (err: any) {
+      Alert.alert("Error", err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Renderizado de imágenes con flexWrap (SIN FlatList)
+
   const renderImages = () => {
-    const images = Platform.OS === 'web' 
-      ? selectedFiles.map(f => ({ uri: URL.createObjectURL(f) }))
-      : formData.imagenesUris.map(uri => ({ uri }));
+    const images = Platform.OS === 'web'
+      ? selectedFiles.map((f) => ({ uri: URL.createObjectURL(f) }))
+      : formData.imagenesUris.map((uri) => ({ uri }));
 
     return (
       <View className="flex-row flex-wrap">
@@ -276,18 +280,12 @@ export default function CrearPostScreen() {
     );
   };
 
-  const imageCount = Platform.OS === 'web' ? selectedFiles.length : formData.imagenesUris.length;
+  const imageCount =
+    Platform.OS === 'web' ? selectedFiles.length : formData.imagenesUris.length;
+
 
   return (
     <View className="flex-1 bg-gray-50">
-      {/* HEADER CON SOMBRA */}
-      <View className="flex-row items-center justify-between mt-14 p-4 bg-white shadow-sm">
-        <TouchableOpacity onPress={() => router.back()} className="p-2">
-          <ArrowLeftIcon size={20} color="#111827" />
-        </TouchableOpacity>
-        <Text className="text-lg font-semibold text-gray-900">Publicar look</Text>
-        <View className="w-10" /> {/* Espacio para alinear el título al centro */}
-      </View>
 
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 40 }}>
         {/* IMÁGENES */}
@@ -309,12 +307,12 @@ export default function CrearPostScreen() {
               >
                 <PhotoIcon size={16} color="#FFFFFF" />
                 <Text className="text-white text-sm font-medium ml-2">
-                  {Platform.OS === 'web' 
-                    ? 'Seleccionar archivos' 
-                    : `Galería (${MAX_IMAGENES - imageCount})`
-                  }
+                  {Platform.OS === 'web'
+                    ? 'Seleccionar archivos'
+                    : `Galería (${MAX_IMAGENES - imageCount})`}
                 </Text>
               </TouchableOpacity>
+
               {Platform.OS !== 'web' && (
                 <TouchableOpacity
                   onPress={() => handleImagePicker('camera')}
@@ -334,7 +332,7 @@ export default function CrearPostScreen() {
           <TextInput
             placeholder="Describe tu estilo..."
             value={formData.descripcion}
-            onChangeText={(text) => setFormData(prev => ({ ...prev, descripcion: text.substring(0, 300) }))}
+            onChangeText={(text) => setFormData((prev) => ({ ...prev, descripcion: text.substring(0, 300) }))}
             multiline
             maxLength={300}
             className="h-28 p-3 border border-gray-200 rounded-lg text-gray-900 text-sm"
@@ -351,14 +349,16 @@ export default function CrearPostScreen() {
             {ETIQUETAS.map((etiqueta) => (
               <TouchableOpacity
                 key={etiqueta}
-                onPress={() => setFormData(prev => ({ ...prev, etiqueta }))}
+                onPress={() => setFormData((prev) => ({ ...prev, etiqueta }))}
                 className={`flex-1 py-2 rounded-lg items-center ${
                   formData.etiqueta === etiqueta ? 'bg-gray-900' : 'bg-gray-100'
                 }`}
               >
-                <Text className={`text-sm font-medium ${
-                  formData.etiqueta === etiqueta ? 'text-white' : 'text-gray-700'
-                }`}>
+                <Text
+                  className={`text-sm font-medium ${
+                    formData.etiqueta === etiqueta ? 'text-white' : 'text-gray-700'
+                  }`}
+                >
                   {etiqueta.charAt(0).toUpperCase() + etiqueta.slice(1)}
                 </Text>
               </TouchableOpacity>
@@ -371,7 +371,7 @@ export default function CrearPostScreen() {
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-base font-semibold text-gray-900">Etiquetas</Text>
             <TouchableOpacity
-              onPress={() => setModalTag(prev => ({ ...prev, visible: true }))}
+              onPress={() => setModalTag((prev) => ({ ...prev, visible: true }))}
               className="flex-row items-center bg-gray-100 px-3 py-1.5 rounded-full"
             >
               <PlusIcon size={14} color="#111827" />
@@ -380,7 +380,10 @@ export default function CrearPostScreen() {
           </View>
           <View className="flex-row flex-wrap gap-2">
             {formData.tags.map((tag, index) => (
-              <View key={index} className="bg-gray-100 rounded-full px-3 py-1.5 flex-row items-center">
+              <View
+                key={index}
+                className="bg-gray-100 rounded-full px-3 py-1.5 flex-row items-center"
+              >
                 <Text className="text-gray-700 text-xs">#{tag}</Text>
                 <TouchableOpacity onPress={() => handleRemoveTag(tag)} className="ml-2">
                   <XMarkIcon size={12} color="#6B7280" />
@@ -396,7 +399,6 @@ export default function CrearPostScreen() {
         {/* Colecciones */}
         <View className="p-4 bg-white mb-3">
           <Text className="text-base font-semibold text-gray-900 mb-2">Colecciones</Text>
-          {/* ScrollView horizontal en lugar de FlatList */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-2">
             {COLECCIONES_PREDEFINIDAS.map((item) => (
               <TouchableOpacity
@@ -408,9 +410,13 @@ export default function CrearPostScreen() {
                     : 'bg-gray-100 border border-gray-200'
                 }`}
               >
-                <Text className={`text-xs font-medium ${
-                  formData.collections.includes(item) ? 'text-white' : 'text-gray-700'
-                }`}>
+                <Text
+                  className={`text-xs font-medium ${
+                    formData.collections.includes(item)
+                      ? 'text-white'
+                      : 'text-gray-700'
+                  }`}
+                >
                   {item}
                 </Text>
               </TouchableOpacity>
@@ -423,19 +429,25 @@ export default function CrearPostScreen() {
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-base font-semibold text-gray-900">Enlaces</Text>
             <TouchableOpacity
-              onPress={() => setModalLink(prev => ({ ...prev, visible: true }))}
+              onPress={() => setModalLink((prev) => ({ ...prev, visible: true }))}
               className="flex-row items-center bg-gray-100 px-3 py-1.5 rounded-full"
             >
               <PlusIcon size={14} color="#111827" />
               <Text className="text-gray-900 text-xs font-medium ml-1">Agregar</Text>
             </TouchableOpacity>
           </View>
+
           {formData.shoppingLinks.length > 0 ? (
             formData.shoppingLinks.map((link, index) => (
-              <View key={index} className="bg-gray-50 p-3 rounded-lg mb-2 flex-row items-center justify-between">
+              <View
+                key={index}
+                className="bg-gray-50 p-3 rounded-lg mb-2 flex-row items-center justify-between"
+              >
                 <View className="flex-1 mr-3">
                   <Text className="text-gray-900 text-sm font-medium">{link.nombre}</Text>
-                  <Text className="text-gray-500 text-xs" numberOfLines={1}>{link.url}</Text>
+                  <Text className="text-gray-500 text-xs" numberOfLines={1}>
+                    {link.url}
+                  </Text>
                 </View>
                 <TouchableOpacity onPress={() => handleRemoveLink(index)}>
                   <XMarkIcon size={16} color="#9CA3AF" />
@@ -447,7 +459,7 @@ export default function CrearPostScreen() {
           )}
         </View>
 
-        {/* BOTÓN PUBLICAR AL FINAL - SIN ICONOS */}
+        {/* BOTÓN PUBLICAR */}
         <View className="p-4">
           <TouchableOpacity
             onPress={handleSubmit}
@@ -459,50 +471,118 @@ export default function CrearPostScreen() {
             {loading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <Text className="text-white text-lg font-semibold">
-                Publicar Look
-              </Text>
+              <Text className="text-white text-lg font-semibold">Publicar Look</Text>
             )}
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      {/* MODALES */}
-      <Modal animationType="fade" transparent visible={modalTag.visible} onRequestClose={() => setModalTag(prev => ({ ...prev, visible: false }))}>
+      {/* MODAL TAG */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={modalTag.visible}
+        onRequestClose={() =>
+          setModalTag((prev) => ({ ...prev, visible: false }))
+        }
+      >
         <View className="flex-1 justify-center items-center bg-black/50">
           <View className="bg-white rounded-xl p-5 w-11/12 max-w-sm">
             <Text className="text-lg font-semibold text-gray-900 mb-3">Nueva etiqueta</Text>
             <TextInput
               placeholder="Ej: vintage, verano..."
               value={modalTag.value}
-              onChangeText={(text) => setModalTag(prev => ({ ...prev, value: text }))}
+              onChangeText={(text) => setModalTag((prev) => ({ ...prev, value: text }))}
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4"
               autoFocus
             />
             <View className="flex-row gap-3">
-              <TouchableOpacity onPress={() => setModalTag(prev => ({ ...prev, visible: false, value: '' }))} className="flex-1 py-2 border border-gray-300 rounded-lg">
-                <Text className="text-gray-700 text-center text-sm font-medium">Cancelar</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setModalTag({ visible: false, value: '' })
+                }
+                className="flex-1 py-2 border border-gray-300 rounded-lg"
+              >
+                <Text className="text-gray-700 text-center text-sm font-medium">
+                  Cancelar
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleAddTag} disabled={!modalTag.value.trim()} className={`flex-1 py-2 rounded-lg ${!modalTag.value.trim() ? 'bg-gray-300' : 'bg-gray-900'}`}>
-                <Text className="text-white text-center text-sm font-medium">Agregar</Text>
+
+              <TouchableOpacity
+                onPress={handleAddTag}
+                disabled={!modalTag.value.trim()}
+                className={`flex-1 py-2 rounded-lg ${
+                  !modalTag.value.trim() ? 'bg-gray-300' : 'bg-gray-900'
+                }`}
+              >
+                <Text className="text-white text-center text-sm font-medium">
+                  Agregar
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal animationType="fade" transparent visible={modalLink.visible} onRequestClose={() => setModalLink(prev => ({ ...prev, visible: false, nombre: '', url: '' }))}>
+      {/* MODAL LINK */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={modalLink.visible}
+        onRequestClose={() =>
+          setModalLink({ visible: false, nombre: '', url: '' })
+        }
+      >
         <View className="flex-1 justify-center items-center bg-black/50">
           <View className="bg-white rounded-xl p-5 w-11/12 max-w-sm">
-            <Text className="text-lg font-semibold text-gray-900 mb-3">Enlace de compra</Text>
-            <TextInput placeholder="Producto" value={modalLink.nombre} onChangeText={(text) => setModalLink(prev => ({ ...prev, nombre: text }))} className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-3" />
-            <TextInput placeholder="URL" value={modalLink.url} onChangeText={(text) => setModalLink(prev => ({ ...prev, url: text }))} className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4" keyboardType="url" autoCapitalize="none" />
+            <Text className="text-lg font-semibold text-gray-900 mb-3">
+              Enlace de compra
+            </Text>
+
+            <TextInput
+              placeholder="Producto"
+              value={modalLink.nombre}
+              onChangeText={(text) =>
+                setModalLink((prev) => ({ ...prev, nombre: text }))
+              }
+              className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-3"
+            />
+
+            <TextInput
+              placeholder="URL"
+              value={modalLink.url}
+              onChangeText={(text) =>
+                setModalLink((prev) => ({ ...prev, url: text }))
+              }
+              className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4"
+              keyboardType="url"
+              autoCapitalize="none"
+            />
+
             <View className="flex-row gap-3">
-              <TouchableOpacity onPress={() => setModalLink(prev => ({ ...prev, visible: false, nombre: '', url: '' }))} className="flex-1 py-2 border border-gray-300 rounded-lg">
-                <Text className="text-gray-700 text-center text-sm font-medium">Cancelar</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setModalLink({ visible: false, nombre: '', url: '' })
+                }
+                className="flex-1 py-2 border border-gray-300 rounded-lg"
+              >
+                <Text className="text-gray-700 text-center text-sm font-medium">
+                  Cancelar
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleAddLink} disabled={!modalLink.nombre.trim() || !modalLink.url.trim()} className={`flex-1 py-2 rounded-lg ${!modalLink.nombre.trim() || !modalLink.url.trim() ? 'bg-gray-300' : 'bg-gray-900'}`}>
-                <Text className="text-white text-center text-sm font-medium">Agregar</Text>
+
+              <TouchableOpacity
+                onPress={handleAddLink}
+                disabled={!modalLink.nombre.trim() || !modalLink.url.trim()}
+                className={`flex-1 py-2 rounded-lg ${
+                  !modalLink.nombre.trim() || !modalLink.url.trim()
+                    ? 'bg-gray-300'
+                    : 'bg-gray-900'
+                }`}
+              >
+                <Text className="text-white text-center text-sm font-medium">
+                  Agregar
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

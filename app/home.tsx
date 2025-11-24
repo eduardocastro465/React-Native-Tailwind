@@ -1,6 +1,6 @@
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { BlurView } from "expo-blur";
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -15,9 +15,11 @@ import {
     Text,
     TouchableOpacity,
     View,
+    Share,
 } from 'react-native';
-import BottomNavBar from './BottomNavBar';
-
+import { PlusIcon, UserIcon, ChevronRightIcon } from "react-native-heroicons/outline";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { environment } from './environments/environment';
 // --- DIMENSIONES Y CONSTANTES ---
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COLUMN_GAP = 16;
@@ -25,18 +27,40 @@ const CARD_WIDTH = (SCREEN_WIDTH - 48 - COLUMN_GAP) / 2;
 const CARD_MARGIN = 8;
 
 // --- INTERFACES Y DATOS DINÁMICOS ---
+interface Usuaria {
+    _id: string;
+    nombre: string;
+    email: string;
+    telefono: string;
+    fotoDePerfil: string;
+    apellidos: string;
+    direccion: string;
+    edad: number;
+    localidad: string;
+}
+
+interface Like {
+    _id: string;
+    postId: string;
+    usuariaId: string;
+    fecha: string;
+}
+
 interface ApiPost {
     _id: string;
-    usuariaId: {
-        _id: string;
-        nombre: string;
-        fotoDePerfil: string;
-    };
+    usuariaId: string;
     imagenUrl: string;
     descripcion: string;
     etiqueta: string;
     aprobado: boolean;
     fecha: string;
+    usuaria: Usuaria;
+    likes: Like[];
+    comentarios: any[];
+    guardados: any[];
+    likesCount: number;
+    comentariosCount: number;
+    guardadosCount: number;
     __v?: number;
 }
 
@@ -58,33 +82,55 @@ interface Post {
     etiqueta?: string;
 }
 
-const API_BASE_URL = 'http://192.168.0.107:4000/api/v1/posts';
+interface UserData {
+    _id: string;
+    nombre: string;
+    email: string;
+    rol: string;
+    fotoDePerfil: string;
+}
+
+const API_BASE_URL =environment.api+'/posts';
+
+// Servicio para obtener datos del usuario
+const getUserData = async (): Promise<UserData | null> => {
+    try {
+        const userDataString = await AsyncStorage.getItem('userData');
+        if (userDataString) {
+            return JSON.parse(userDataString);
+        }
+        return null;
+    } catch (error) {
+        console.error('Error obteniendo datos del usuario:', error);
+        return null;
+    }
+};
 
 const apiService = {
     getApprovedPosts: async (): Promise<ApiPost[]> => {
         try {
-            const response = await fetch(`${API_BASE_URL}/aprobados`, {
+            const response = await fetch(`${API_BASE_URL}/posts-completos`, {
                 cache: "no-store"
             });
             if (!response.ok) throw new Error(`Error fetching posts: ${response.status}`);
-            return await response.json();
+            const data = await response.json();
+            return data;
         } catch (error) {
             console.error('Error fetching posts:', error);
             return [];
         }
     },
 
-    likePost: async (postId: string, usuariaId: string) => {
+    likePost: async (postId: string, userId: string) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/likes`, {
+            const response = await fetch(`${API_BASE_URL}/${userId}/like`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ postId, usuariaId }),
+                body: JSON.stringify({
+                    postId,
+                    usuariaId: userId
+                }),
             });
-            if (response.status === 400) {
-                const errorData = await response.json();
-                throw new Error(errorData.error);
-            }
             return response.ok;
         } catch (error) {
             console.error('Error liking post:', error);
@@ -92,12 +138,15 @@ const apiService = {
         }
     },
 
-    unlikePost: async (postId: string, usuariaId: string) => {
+    unlikePost: async (postId: string, userId: string) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/likes`, {
+            const response = await fetch(`${API_BASE_URL}/${userId}/like`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ postId, usuariaId }),
+                body: JSON.stringify({
+                    postId,
+                    usuariaId: userId
+                }),
             });
             return response.ok;
         } catch (error) {
@@ -107,33 +156,258 @@ const apiService = {
     },
 };
 
-const transformApiPostToAppPost = (apiPost: ApiPost): Post => {
+// COMPARTIR URL O POST
+const handleShare = (postId?: string) => {
+    const baseUrl = 'https://atelier-play.en.aptoide.com';
+    const deepLink = postId
+        ? `atelierplay://post/${postId}`
+        : baseUrl;
+
+    const message = postId
+        ? `Mira este post en Atelier Play: ${deepLink}\n\nO descarga la app: ${baseUrl}`
+        : `Descarga Atelier Play: ${baseUrl}`;
+
+    if (postId) {
+        Linking.openURL(deepLink).catch(() => {
+            Linking.openURL(baseUrl);
+        });
+    } else {
+        Linking.openURL(baseUrl);
+    }
+};
+
+// Función transformadora que recibe el userId dinámicamente
+const transformApiPostToAppPost = (apiPost: ApiPost, currentUserId: string): Post => {
     const sizes: Array<'small' | 'medium' | 'large' | 'xlarge'> = ['small', 'medium', 'large', 'xlarge'];
     const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
 
     const categoryMap: { [key: string]: string } = {
         'comprado': 'Purchased',
         'rentado': 'Rented',
-        'propio': 'Own Style'
+        'propio': 'Own Style',
+        'nuevo': 'New'
     };
+
+    const userHasLiked = apiPost.likes.some(like => like.usuariaId === currentUserId);
 
     return {
         _id: apiPost._id,
-        user_id: apiPost.usuariaId._id,
-        user_name: apiPost.usuariaId.nombre,
-        user_avatar: apiPost.usuariaId.fotoDePerfil,
+        user_id: apiPost.usuariaId,
+        user_name: apiPost.usuaria.nombre,
+        user_avatar: apiPost.usuaria.fotoDePerfil,
         image_url: apiPost.imagenUrl,
         description: apiPost.descripcion,
-        likes_count: Math.floor(Math.random() * 500) + 50,
-        comments_count: Math.floor(Math.random() * 50) + 5,
+        likes_count: apiPost.likesCount || 0,
+        comments_count: apiPost.comentariosCount || 0,
         created_at: apiPost.fecha,
-        user_has_liked: false,
+        user_has_liked: userHasLiked,
         user_has_saved: false,
         category: categoryMap[apiPost.etiqueta] || 'Style',
         size: randomSize,
         aspectRatio: 0.75 + Math.random() * 0.5,
         etiqueta: apiPost.etiqueta
     };
+};
+
+const PostCard: React.FC<{
+    post: Post;
+    onLike: (id: string) => void;
+    onSave: (id: string) => void;
+    onComment: (id: string) => void;
+    onProfilePress: (userId: string) => void;
+    onPostPress: (post: Post) => void;
+}> = ({ post, onLike, onSave, onComment, onProfilePress, onPostPress }) => {
+    const [isDoubleTap, setIsDoubleTap] = useState(false);
+    const [imageHeight, setImageHeight] = useState(CARD_WIDTH * 1.2);
+    const lastTapRef = useRef<number | null>(null);
+
+    const handleLike = () => {
+        onLike(post._id);
+    };
+
+    const handleShare = async () => {
+        try {
+            const postUrl = `https://atelier-play.en.aptoide.com/post/${post._id}`;
+            await Share.share({
+                message: `Mira este post en Atelier Play: ${postUrl}\n\n${post.description}`
+            });
+        } catch (error) {
+            console.error('Error al compartir:', error);
+        }
+    };
+
+    const getTimeAgo = () => {
+        const diff = Math.floor((Date.now() - new Date(post.created_at).getTime()) / 1000);
+        if (diff < 60) return 'ahora';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+        if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
+        return `${Math.floor(diff / 604800)} sem`;
+    };
+
+    const handleDoubleTap = () => {
+        const now = Date.now();
+        if (lastTapRef.current && (now - lastTapRef.current) < 500) {
+            setIsDoubleTap(true);
+            if (!post.user_has_liked) handleLike();
+            setTimeout(() => setIsDoubleTap(false), 600);
+        }
+        lastTapRef.current = now;
+    };
+
+    const handleImageLoad = (event: any) => {
+        const native = event?.nativeEvent || {};
+        const width = native?.source?.width ?? native?.width ?? native?.naturalWidth;
+        const height = native?.source?.height ?? native?.height ?? native?.naturalHeight;
+
+        if (width && height) {
+            const aspectRatio = height / width;
+            setImageHeight(CARD_WIDTH * aspectRatio);
+            return;
+        }
+
+        try {
+            const uri = post.image_url;
+            if (uri) {
+                Image.getSize(uri, (w: number, h: number) => {
+                    if (w && h) setImageHeight(CARD_WIDTH * (h / w));
+                }, () => {
+                    console.log('Error al cargar dimensiones de la imagen');
+                });
+            }
+        } catch (e) {
+            console.log('Error en handleImageLoad:', e);
+        }
+    };
+
+    return (
+        <View style={{
+            width: CARD_WIDTH,
+            marginBottom: 16,
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            overflow: 'hidden',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 8,
+            elevation: 4,
+        }}>
+
+            {/* HEADER */}
+            <View className="flex-row items-center justify-between p-3 pb-2">
+                <TouchableOpacity 
+                    onPress={() => onProfilePress(post.user_id)} 
+                    className="flex-row items-center flex-1"
+                >
+                    <Image
+                        source={{ uri: post.user_avatar }}
+                        className="w-6 h-6 rounded-full bg-gray-200"
+                        onError={(e) => console.log('Error loading avatar:', e.nativeEvent.error)}
+                    />
+                    <View className="ml-2 flex-1">
+                        <Text className="text-[10px] font-semibold text-gray-900" numberOfLines={1}>
+                            {post.user_name}
+                        </Text>
+                        <View className="flex-row items-center gap-1 mt-0.5">
+                            {post.category && (
+                                <Text className="text-[8px] text-gray-500 uppercase tracking-wider">
+                                    {post.category}
+                                </Text>
+                            )}
+                            <Text className="text-[8px] text-gray-400">• {getTimeAgo()}</Text>
+                        </View>
+                    </View>
+                </TouchableOpacity>
+                <TouchableOpacity className="p-1">
+                    <Feather name="more-horizontal" size={13} color="#9CA3AF" />
+                </TouchableOpacity>
+            </View>
+
+            {/* IMAGE WITH DOUBLE TAP */}
+            <TouchableOpacity activeOpacity={1} onPress={handleDoubleTap}>
+                <View className="relative">
+                    <Image
+                        source={{ uri: post.image_url }}
+                        style={{ height: imageHeight, width: CARD_WIDTH }}
+                        className="bg-gray-100"
+                        resizeMode="cover"
+                        onLoad={handleImageLoad}
+                        onError={(e) => console.log('Error loading image:', e.nativeEvent.error)}
+                    />
+
+                    {isDoubleTap && (
+                        <View className="absolute inset-0 items-center justify-center bg-black/20">
+                            <Feather name="heart" size={40} color="#EF4444" />
+                        </View>
+                    )}
+                </View>
+            </TouchableOpacity>
+
+            {/* ACTION BUTTONS */}
+            <View className="flex-row items-center justify-between p-3">
+                <View className="flex-row items-center">
+                    {/* LIKE BUTTON - USANDO DIRECTAMENTE LAS PROPS DEL POST */}
+                    <TouchableOpacity
+                        onPress={handleLike}
+                        className="flex-row items-center mr-3"
+                    >
+                        <Ionicons
+                            name={post.user_has_liked ? "heart" : "heart-outline"}
+                            size={16}
+                            color={post.user_has_liked ? "#EF4444" : "#000000"}
+                        />
+                        <Text className="text-[10px] font-semibold text-gray-900 ml-1">
+                            {post.likes_count}
+                        </Text>
+                    </TouchableOpacity>
+
+                    {/* COMMENT BUTTON */}
+                    <TouchableOpacity 
+                        onPress={() => onComment(post._id)}
+                        className="flex-row items-center mr-3"
+                    >
+                        <Ionicons name="chatbubble-outline" size={16} color="#000000" />
+                        <Text className="text-[10px] font-semibold text-gray-900 ml-1">
+                            {post.comments_count}
+                        </Text>
+                    </TouchableOpacity>
+
+                    {/* SHARE BUTTON */}
+                    <TouchableOpacity onPress={handleShare}>
+                        <Ionicons name="share-outline" size={16} color="#000000" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* SAVE BUTTON */}
+                <TouchableOpacity onPress={() => onSave(post._id)}>
+                    <Ionicons 
+                        name={post.user_has_saved ? "bookmark" : "bookmark-outline"} 
+                        size={16} 
+                        color="#000000" 
+                    />
+                </TouchableOpacity>
+            </View>
+
+            {/* DESCRIPTION & COMMENTS */}
+            <View className="p-3 pt-0">
+                <TouchableOpacity onPress={() => onPostPress(post)}>
+                    {post.description && (
+                        <Text className="text-[10px] text-gray-700 leading-3.5" numberOfLines={2}>
+                            <Text className="font-semibold">{post.user_name} </Text>
+                            {post.description}
+                        </Text>
+                    )}
+
+                    {post.comments_count > 0 && (
+                        <Text className="text-[9px] text-gray-500 mt-1">
+                            Ver {post.comments_count} comentarios
+                        </Text>
+                    )}
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
 };
 
 const HeroSection = () => {
@@ -163,7 +437,7 @@ const HeroSection = () => {
     }, []);
 
     return (
-        <View className="h-[50vh] flex-row bg-[#f6f2e7]  mt-12 mx-0 rounded-2xl overflow-hidden">
+        <View className="h-[50vh] flex-row bg-[#f6f2e7] mt-12 mx-0 rounded-2xl overflow-hidden">
             <Animated.View
                 style={[
                     {
@@ -198,173 +472,6 @@ const HeroSection = () => {
                     className="w-full h-[90%] rounded-lg self-center"
                     resizeMode="cover"
                 />
-            </View>
-        </View>
-    );
-};
-
-const PostCard: React.FC<{
-    post: Post;
-    onLike: (id: string) => void;
-    onSave: (id: string) => void;
-    onComment: (id: string) => void;
-    onShare: (id: string) => void;
-    onProfilePress: (userId: string) => void;
-    onPostPress: (post: Post) => void;
-}> = ({ post, onLike, onSave, onComment, onShare, onProfilePress, onPostPress }) => {
-    const [isLiked, setIsLiked] = useState(post.user_has_liked);
-    const [isSaved, setIsSaved] = useState(post.user_has_saved);
-    const [isDoubleTap, setIsDoubleTap] = useState(false);
-    const [imageHeight, setImageHeight] = useState(CARD_WIDTH * 1.2);
-    const lastTapRef = useRef<number | null>(null);
-
-    const getTimeAgo = () => {
-        const diff = Math.floor((Date.now() - new Date(post.created_at).getTime()) / 1000);
-        if (diff < 60) return 'ahora';
-        if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-        if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
-        return `${Math.floor(diff / 604800)} sem`;
-    };
-
-    const handleLike = async () => {
-        setIsLiked(!isLiked);
-        await onLike(post._id);
-    };
-
-    const handleSave = async () => {
-        setIsSaved(!isSaved);
-        await onSave(post._id);
-    };
-
-    const handleDoubleTap = () => {
-        const now = Date.now();
-        if (lastTapRef.current && (now - lastTapRef.current) < 500) {
-            setIsDoubleTap(true);
-            if (!isLiked) handleLike();
-            setTimeout(() => setIsDoubleTap(false), 600);
-        }
-        lastTapRef.current = now;
-    };
-
-    const handleImageLoad = (event: any) => {
-        // En web react-native-web puede no exponer `nativeEvent.source`.
-        // Intentamos varias propiedades para obtener ancho/alto de forma segura.
-        const native = event?.nativeEvent || {};
-        const width = native?.source?.width ?? native?.width ?? native?.naturalWidth;
-        const height = native?.source?.height ?? native?.height ?? native?.naturalHeight;
-
-        if (width && height) {
-            const aspectRatio = height / width;
-            setImageHeight(CARD_WIDTH * aspectRatio);
-            return;
-        }
-
-        // Fallback: intentar obtener tamaño usando Image.getSize con la URI
-        try {
-            const uri = (post && post.image_url) || (native?.uri || null);
-            if (uri) {
-                Image.getSize(uri, (w: number, h: number) => {
-                    if (w && h) setImageHeight(CARD_WIDTH * (h / w));
-                }, () => {
-                    // no-op on error
-                });
-            }
-        } catch (e) {
-            // Ignorar errores en web
-        }
-    };
-
-    return (
-        <View style={{
-            width: CARD_WIDTH,
-            marginBottom: 16,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            overflow: 'hidden',
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.08,
-            shadowRadius: 8,
-            elevation: 4,
-        }}>
-
-            <View className="flex-row items-center justify-between p-3 pb-2">
-                <TouchableOpacity onPress={() => onProfilePress(post.user_id)} className="flex-row items-center flex-1">
-                    <Image source={{ uri: post.user_avatar }} className="w-6 h-6 rounded-full bg-gray-200" />
-                    <View className="ml-2 flex-1">
-                        <Text className="text-[10px] font-semibold text-gray-900" numberOfLines={1}>
-                            {post.user_name}
-                        </Text>
-                        <View className="flex-row items-center gap-1 mt-0.5">
-                            {post.category && (
-                                <Text className="text-[8px] text-gray-500 uppercase tracking-wider">
-                                    {post.category}
-                                </Text>
-                            )}
-                            <Text className="text-[8px] text-gray-400">• {getTimeAgo()}</Text>
-                        </View>
-                    </View>
-                </TouchableOpacity>
-                <TouchableOpacity className="p-1">
-                    <Feather name="more-horizontal" size={13} color="#9CA3AF" />
-                </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity activeOpacity={1} onPress={handleDoubleTap}>
-                <View className="relative">
-                    <Image
-                        source={{ uri: post.image_url }}
-                        style={{ height: imageHeight, width: CARD_WIDTH }}
-                        className="bg-gray-100"
-                        resizeMode="contain"
-                        onLoad={handleImageLoad}
-                    />
-
-                    {isDoubleTap && (
-                        <View className="absolute inset-0 items-center justify-center">
-                            <Feather name="heart" size={40} color="#EF4444" />
-                        </View>
-                    )}
-
-                    <BlurView intensity={20} tint="dark" className="absolute bottom-2 right-2 rounded-full overflow-hidden">
-                        <View className="flex-row bg-white/15 p-1 gap-0.5">
-                            <TouchableOpacity onPress={handleLike} className="p-1.5">
-                                <Ionicons name={isLiked ? "heart" : "heart-outline"} size={11} color={isLiked ? "#EF4444" : "#FFFFFF"} />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => onComment(post._id)} className="p-1.5">
-                                <Ionicons name="chatbubble-outline" size={11} color="#FFFFFF" />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => onShare(post._id)} className="p-1.5">
-                                <Ionicons name="share-outline" size={11} color="#FFFFFF" />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={handleSave} className="p-1.5">
-                                <Ionicons name={isSaved ? "bookmark" : "bookmark-outline"} size={11} color={isSaved ? "#000000" : "#FFFFFF"} />
-                            </TouchableOpacity>
-                        </View>
-                    </BlurView>
-                </View>
-            </TouchableOpacity>
-
-            <View className="p-3 pt-2">
-                <TouchableOpacity onPress={() => onPostPress(post)}>
-                    <Text className="text-[10px] font-semibold text-gray-900 mb-1">
-                        {post.likes_count + (isLiked ? 1 : 0)} me gusta
-                    </Text>
-
-                    {post.description && (
-                        <Text className="text-[10px] text-gray-700 leading-3.5" numberOfLines={2}>
-                            <Text className="font-semibold">{post.user_name} </Text>
-                            {post.description}
-                        </Text>
-                    )}
-
-                    {post.comments_count > 0 && (
-                        <Text className="text-[9px] text-gray-500 mt-1">
-                            Ver {post.comments_count} comentarios
-                        </Text>
-                    )}
-                </TouchableOpacity>
             </View>
         </View>
     );
@@ -489,12 +596,117 @@ const PromoCard: React.FC = () => {
     );
 };
 
-const MasonryLayout = ({ posts, onLike, onSave, onComment, onShare, onProfilePress, onPostPress }: {
+const SeccionOption: React.FC = () => {
+    const router = useRouter();
+    const pathname = usePathname() || '/';
+
+    const menuItems = [
+        {
+            title: 'Crear Contenido',
+            subtitle: 'Empieza un nuevo post',
+            path: '/crear-post',
+            Icon: PlusIcon
+        },
+        {
+            title: 'Administrar Perfil',
+            subtitle: 'Ver y editar tu cuenta',
+            path: '/profile',
+            Icon: UserIcon
+        },
+    ];
+
+    const isActive = (path: string) => {
+        if (pathname === '/' && path === '/') return true;
+        if (path !== '/' && pathname.startsWith(path)) return true;
+        return false;
+    };
+
+    const handleNavigation = (path: string) => {
+        router.push(path);
+    };
+
+    return (
+        <View className="flex-1 bg-transparent">
+            <View className="px-6 py-6 mb-6 ">
+                <Text className="text-3xl font-bold text-gray-900 tracking-tight">
+                    EXPLORAR
+                </Text>
+                <Text className="text-sm text-gray-600 mt-2 font-medium">
+                    Navega y gestiona tu actividad
+                </Text>
+            </View>
+
+            <View className="px-5">
+                <View
+                    className="bg-white rounded-2xl overflow-hidden border border-gray-100"
+                    style={{
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 4 },
+                        shadowOpacity: 0.08,
+                        shadowRadius: 10,
+                        elevation: 5,
+                    }}
+                >
+                    {menuItems.map(({ title, subtitle, path, Icon }, index) => {
+                        const active = isActive(path);
+                        const isLast = index === menuItems.length - 1;
+
+                        const itemClass = `
+                            flex-row items-center justify-between
+                            ${active ? 'bg-gray-900' : 'bg-white'} 
+                            ${!isLast ? 'border-b border-gray-100' : ''}
+                            p-4 active:scale-[0.98] transition-transform duration-100
+                        `;
+
+                        const iconColor = active ? '#FFFFFF' : '#111827';
+                        const titleClass = active ? 'text-white' : 'text-gray-900';
+                        const subtitleClass = active ? 'text-white/70' : 'text-gray-500';
+                        const chevronColor = active ? '#FFFFFF' : '#9CA3AF';
+
+                        return (
+                            <TouchableOpacity
+                                key={path}
+                                onPress={() => handleNavigation(path)}
+                                className={itemClass}
+                                activeOpacity={0.85}
+                            >
+                                <View className="flex-row items-center flex-1">
+                                    <View className={`
+                                        w-11 h-11 rounded-xl items-center justify-center mr-4
+                                        ${active ? 'bg-white/10' : 'bg-gray-100'}
+                                    `}>
+                                        <Icon size={22} color={iconColor} />
+                                    </View>
+
+                                    <View>
+                                        <Text className={`text-base font-bold ${titleClass}`}>
+                                            {title}
+                                        </Text>
+                                        <Text className={`text-xs mt-0.5 ${subtitleClass}`}>
+                                            {subtitle}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                <ChevronRightIcon
+                                    size={18}
+                                    color={chevronColor}
+                                    style={{ opacity: active ? 1 : 0.4 }}
+                                />
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            </View>
+        </View>
+    );
+};
+
+const MasonryLayout = ({ posts, onLike, onSave, onComment, onProfilePress, onPostPress }: {
     posts: Post[];
     onLike: (id: string) => void;
     onSave: (id: string) => void;
     onComment: (id: string) => void;
-    onShare: (id: string) => void;
     onProfilePress: (userId: string) => void;
     onPostPress: (post: Post) => void;
 }) => {
@@ -547,7 +759,6 @@ const MasonryLayout = ({ posts, onLike, onSave, onComment, onShare, onProfilePre
                             onLike={onLike}
                             onSave={onSave}
                             onComment={onComment}
-                            onShare={onShare}
                             onProfilePress={onProfilePress}
                             onPostPress={onPostPress}
                         />
@@ -564,44 +775,43 @@ const PostDetailModal: React.FC<{
     onLike: (id: string) => void;
     onSave: (id: string) => void;
     onComment: (id: string) => void;
-    onShare: (id: string) => void;
     onProfilePress: (userId: string) => void;
-}> = ({ post, onClose, onLike, onSave, onComment, onShare, onProfilePress }) => {
-    const [isLiked, setIsLiked] = useState(false);
-    const [isSaved, setIsSaved] = useState(false);
-    const [comments, setComments] = useState<any[]>([]);
-    const [isLoadingComments, setIsLoadingComments] = useState(false);
+}> = ({ post, onClose, onLike, onSave, onComment, onProfilePress }) => {
     const [imageHeight, setImageHeight] = useState(SCREEN_WIDTH * 1.2);
-
     const router = useRouter();
 
     useEffect(() => {
-        if (post) {
-            setIsLiked(post.user_has_liked);
-            setIsSaved(post.user_has_saved);
-
+        if (post?.image_url) {
             Image.getSize(post.image_url, (width, height) => {
                 const aspectRatio = height / width;
                 setImageHeight(SCREEN_WIDTH * aspectRatio);
             });
         }
-    }, [post]);
-
-    if (!post) return null;
+    }, [post?.image_url]);
 
     const handleLike = async () => {
-        const newLikedState = !isLiked;
-        setIsLiked(newLikedState);
+        if (!post) return;
         await onLike(post._id);
     };
 
     const handleSave = async () => {
-        const newSavedState = !isSaved;
-        setIsSaved(newSavedState);
+        if (!post) return;
         await onSave(post._id);
     };
 
+    const handleShare = async () => {
+        if (!post) return;
+        try {
+            await Share.share({
+                message: `Mira este post: ${post.description}`
+            });
+        } catch (error) {
+            console.error('Error al compartir:', error);
+        }
+    };
+
     const getTimeAgo = () => {
+        if (!post) return '';
         const diff = Math.floor((Date.now() - new Date(post.created_at).getTime()) / 1000);
         if (diff < 60) return 'ahora';
         if (diff < 3600) return `${Math.floor(diff / 60)}m`;
@@ -611,14 +821,18 @@ const PostDetailModal: React.FC<{
     };
 
     const handleProfileNavigate = () => {
+        if (!post) return;
         onClose();
         onProfilePress(post.user_id);
     };
 
     const handleCommentNavigate = () => {
+        if (!post) return;
         onClose();
         onComment(post._id);
     };
+
+    if (!post) return null;
 
     return (
         <Modal
@@ -669,6 +883,7 @@ const PostDetailModal: React.FC<{
                         resizeMode="contain"
                     />
 
+                    {/* BOTONES DE LIKE Y COMPARTIR EN MODAL - USANDO PROPS DIRECTAMENTE */}
                     <View className="flex-row items-center justify-between p-4">
                         <View className="flex-row items-center gap-4">
                             <TouchableOpacity
@@ -676,17 +891,17 @@ const PostDetailModal: React.FC<{
                                 className="flex-row items-center gap-1"
                             >
                                 <Ionicons
-                                    name={isLiked ? "heart" : "heart-outline"}
+                                    name={post.user_has_liked ? "heart" : "heart-outline"}
                                     size={20}
-                                    color={isLiked ? "#EF4444" : "#6B7280"}
+                                    color={post.user_has_liked ? "#EF4444" : "#6B7280"}
                                 />
-                                <Text className={`text-sm font-medium ${isLiked ? 'text-red-500' : 'text-gray-700'}`}>
-                                    {post.likes_count + (isLiked ? 1 : 0)}
+                                <Text className={`text-sm font-medium ${post.user_has_liked ? 'text-red-500' : 'text-gray-700'}`}>
+                                    {post.likes_count}
                                 </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
-                                onPress={() => onShare(post._id)}
+                                onPress={handleShare}
                                 className="flex-row items-center gap-1"
                             >
                                 <Ionicons name="share-outline" size={20} color="#6B7280" />
@@ -695,9 +910,9 @@ const PostDetailModal: React.FC<{
 
                         <TouchableOpacity onPress={handleSave}>
                             <Ionicons
-                                name={isSaved ? "bookmark" : "bookmark-outline"}
+                                name={post.user_has_saved ? "bookmark" : "bookmark-outline"}
                                 size={20}
-                                color={isSaved ? "#000000" : "#6B7280"}
+                                color={post.user_has_saved ? "#000000" : "#6B7280"}
                             />
                         </TouchableOpacity>
                     </View>
@@ -733,67 +948,126 @@ const Home: React.FC = () => {
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-    const currentUserId = '67daf51df4ed8050c7b72619';
+    // Obtener el ID del usuario actual al cargar el componente
+    useEffect(() => {
+        const loadUserData = async () => {
+            try {
+                const userData = await getUserData();
+                if (userData && userData._id) {
+                    setCurrentUserId(userData._id);
+                    console.log('User ID cargado:', userData._id);
+                } else {
+                    console.log('No se encontraron datos del usuario');
+                    // Redirigir al login si no hay usuario
+                    router.push('/login');
+                }
+            } catch (error) {
+                console.error('Error cargando datos del usuario:', error);
+            }
+        };
+
+        loadUserData();
+    }, []);
 
     const fetchAllData = async () => {
+        if (!currentUserId) {
+            console.log('Esperando ID del usuario...');
+            return;
+        }
+
         try {
             setError(null);
             setLoading(true);
+            console.log('Fetching posts from:', `${API_BASE_URL}/posts-completos`);
             const apiPosts = await apiService.getApprovedPosts();
-            const transformedPosts = apiPosts.map(transformApiPostToAppPost);
+            console.log('Posts received:', apiPosts.length);
+
+            // Pasar el currentUserId a la función transformadora
+            const transformedPosts = apiPosts.map(apiPost => transformApiPostToAppPost(apiPost, currentUserId));
+            console.log('Transformed posts:', transformedPosts.length);
+
             setPosts(transformedPosts);
         } catch (err) {
+            console.error('Error in fetchAllData:', err);
             setError('Error al cargar los posts');
-            console.error('Error fetching data:', err);
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchAllData();
-    }, []);
+        if (currentUserId) {
+            fetchAllData();
+        }
+    }, [currentUserId]);
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
         await fetchAllData();
         setRefreshing(false);
-    }, []);
+    }, [currentUserId]);
 
+    // CORRECCIÓN PRINCIPAL: Función que usa el currentUserId dinámico
     const handleLikePost = useCallback(async (postId: string) => {
-        const post = posts.find(p => p._id === postId);
-        if (!post) return;
-
-        const success = post.user_has_liked
-            ? await apiService.unlikePost(postId, currentUserId)
-            : await apiService.likePost(postId, currentUserId);
-
-        if (success) {
-            setPosts(prev => prev.map(p =>
-                p._id === postId ? {
-                    ...p,
-                    user_has_liked: !p.user_has_liked,
-                    likes_count: p.user_has_liked ? p.likes_count - 1 : p.likes_count + 1
-                } : p
-            ));
+        if (!currentUserId) {
+            console.error('No hay usuario autenticado');
+            return;
         }
-    }, [posts, currentUserId]);
+
+        // Actualización optimista inmediata sin recargar toda la lista
+        setPosts(prevPosts => {
+            return prevPosts.map(post => {
+                if (post._id === postId) {
+                    const newLikedState = !post.user_has_liked;
+                    const newLikesCount = newLikedState ? post.likes_count + 1 : post.likes_count - 1;
+                    
+                    // Llamar a la API en segundo plano
+                    (async () => {
+                        try {
+                            const success = post.user_has_liked
+                                ? await apiService.unlikePost(postId, currentUserId)
+                                : await apiService.likePost(postId, currentUserId);
+
+                            if (!success) {
+                                // Revertir si la API falla
+                                setPosts(currentPosts => currentPosts.map(p =>
+                                    p._id === postId ? {
+                                        ...p,
+                                        user_has_liked: post.user_has_liked,
+                                        likes_count: post.likes_count
+                                    } : p
+                                ));
+                                console.log('Error al actualizar like');
+                            }
+                        } catch (error) {
+                            // Revertir en caso de error
+                            setPosts(currentPosts => currentPosts.map(p =>
+                                p._id === postId ? {
+                                    ...p,
+                                    user_has_liked: post.user_has_liked,
+                                    likes_count: post.likes_count
+                                } : p
+                            ));
+                            console.error('Error de red:', error);
+                        }
+                    })();
+
+                    return {
+                        ...post,
+                        user_has_liked: newLikedState,
+                        likes_count: newLikesCount
+                    };
+                }
+                return post;
+            });
+        });
+    }, [currentUserId]);
 
     const handleSavePost = useCallback(async (postId: string) => {
-        const post = posts.find(p => p._id === postId);
-        if (!post) return;
-
-        const success = post.user_has_saved
-            ? await apiService.unsavePost(postId, currentUserId)
-            : await apiService.savePost(postId, currentUserId);
-
-        if (success) {
-            setPosts(prev => prev.map(p =>
-                p._id === postId ? { ...p, user_has_saved: !p.user_has_saved } : p
-            ));
-        }
-    }, [posts, currentUserId]);
+        console.log('Guardar post:', postId);
+    }, []);
 
     const handleProfilePress = (userId: string) => {
         router.push(`/profile/${userId}`);
@@ -801,10 +1075,6 @@ const Home: React.FC = () => {
 
     const handleComment = (postId: string) => {
         router.push(`/comments/${postId}`);
-    };
-
-    const handleShare = (postId: string) => {
-        console.log('Compartir post:', postId);
     };
 
     const handlePostPress = (post: Post) => {
@@ -819,17 +1089,28 @@ const Home: React.FC = () => {
         <>
             <HeroSection />
             <PromoCard />
-            <MasonryLayout
-                posts={posts}
-                onLike={handleLikePost}
-                onSave={handleSavePost}
-                onComment={handleComment}
-                onShare={handleShare}
-                onProfilePress={handleProfilePress}
-                onPostPress={handlePostPress}
-            />
+            {currentUserId && (
+                <MasonryLayout
+                    posts={posts}
+                    onLike={handleLikePost}
+                    onSave={handleSavePost}
+                    onComment={handleComment}
+                    onProfilePress={handleProfilePress}
+                    onPostPress={handlePostPress}
+                />
+            )}
+            <SeccionOption />
         </>
     );
+
+    if (!currentUserId) {
+        return (
+            <View className="flex-1 bg-[#f6f2e7] justify-center items-center">
+                <ActivityIndicator size="large" color="#8B4513" />
+                <Text className="mt-4 text-gray-500 text-base">Cargando usuario...</Text>
+            </View>
+        );
+    }
 
     if (loading) {
         return (
@@ -884,12 +1165,9 @@ const Home: React.FC = () => {
                     onLike={handleLikePost}
                     onSave={handleSavePost}
                     onComment={handleComment}
-                    onShare={handleShare}
                     onProfilePress={handleProfilePress}
                 />
             )}
-
-            <BottomNavBar/>
         </View>
     );
 };
