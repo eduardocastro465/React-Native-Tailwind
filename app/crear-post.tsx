@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -21,6 +21,7 @@ import {
     XMarkIcon,
 } from 'react-native-heroicons/outline';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { environment } from './environments/environment';
 
 // --- INTERFACES ---
@@ -33,13 +34,76 @@ interface PostFormData {
   shoppingLinks: { nombre: string; url: string }[];
 }
 
+interface UserData {
+  _id: string;
+  nombre: string;
+  fotoDePerfil: string;
+  email?: string;
+}
+
 // --- CONFIG ---
-const USUARIA_ID = '67daf8baf4ed8050c7b7269a';
-const API_URL = environment.api+'/posts';
+const API_URL = environment.api + '/posts';
 
 const ETIQUETAS = ['propio', 'comprado', 'rentado'];
 const COLECCIONES_PREDEFINIDAS = ['Verano', 'Invierno', 'Ocasiones', 'Trabajo', 'Casual'];
 const MAX_IMAGENES = 10;
+
+// CORRECCIÓN: Función para decodificar token manualmente (sin jwt-decode)
+const decodeToken = (token: string): any => {
+  try {
+    // Un JWT tiene 3 partes: header.payload.signature
+    const payloadBase64 = token.split('.')[1];
+    // Reemplazar caracteres URL-safe de Base64
+    const base64 = payloadBase64.replace(/-/g, '+').replace(/_/g, '/');
+    // Decodificar Base64
+    const payloadJson = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(payloadJson);
+  } catch (error) {
+    console.error('Error decodificando token manualmente:', error);
+    return null;
+  }
+};
+
+// CORRECCIÓN: Obtener ID del usuario desde token manualmente
+const getUserIdFromToken = async (): Promise<string | null> => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    console.log('Token from AsyncStorage:', token ? 'exists' : 'null');
+    
+    if (!token) return null;
+
+    const decoded = decodeToken(token);
+    console.log('Decoded token:', decoded);
+    
+    return decoded?._id || null;
+  } catch (error) {
+    console.error("Error decodificando token:", error);
+    return null;
+  }
+};
+
+// Servicio para obtener datos del usuario
+const getUserData = async (): Promise<UserData | null> => {
+  try {
+    const userDataString = await AsyncStorage.getItem('userData');
+    console.log('userDataString from AsyncStorage:', userDataString);
+    
+    if (userDataString) {
+      const userData = JSON.parse(userDataString);
+      console.log('Parsed userData:', userData);
+      return userData;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error obteniendo datos del usuario:', error);
+    return null;
+  }
+};
 
 // PERMISOS
 const requestPermission = async (type: 'camera' | 'gallery'): Promise<boolean> => {
@@ -73,11 +137,12 @@ const requestPermission = async (type: 'camera' | 'gallery'): Promise<boolean> =
   }
 };
 
-
 // FUNCION SENCILLA - SIN React.FC
 export default function CrearPostScreen() {
   const router = useRouter();
 
+  const [userData, setUserData] = useState<UserData | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
   const [formData, setFormData] = useState<PostFormData>({
     imagenesUris: [],
     descripcion: '',
@@ -91,6 +156,58 @@ export default function CrearPostScreen() {
   const [loading, setLoading] = useState(false);
   const [modalTag, setModalTag] = useState({ visible: false, value: '' });
   const [modalLink, setModalLink] = useState({ visible: false, nombre: '', url: '' });
+
+  // CORRECCIÓN: Obtener datos del usuario al montar el componente de manera robusta
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        console.log('Cargando datos del usuario para crear post...');
+        
+        // Primero intentar desde userData
+        const userData = await getUserData();
+        console.log('UserData obtenido:', userData);
+        
+        if (userData && userData._id) {
+          console.log('User ID cargado desde userData:', userData._id);
+          setUserData(userData);
+          setLoadingUser(false);
+          return;
+        }
+
+        // Si no funciona, intentar desde el token
+        console.log('Intentando obtener ID desde token...');
+        const userIdFromToken = await getUserIdFromToken();
+        console.log('User ID desde token:', userIdFromToken);
+        
+        if (userIdFromToken) {
+          // Crear un objeto userData básico con el ID del token
+          const basicUserData: UserData = {
+            _id: userIdFromToken,
+            nombre: 'Usuario',
+            fotoDePerfil: 'https://res.cloudinary.com/dxmhlxdxo/image/upload/v1743916178/Imagenes%20para%20usar%20xD/gxvcu5gik59c0uu7zz4p.png',
+            email: ''
+          };
+          setUserData(basicUserData);
+          setLoadingUser(false);
+          return;
+        }
+
+        // Si nada funciona, mostrar error
+        console.log('No se pudo obtener el ID del usuario');
+        Alert.alert('Error', 'No se pudo obtener la información del usuario');
+        router.back();
+        
+      } catch (error) {
+        console.error('Error cargando datos del usuario:', error);
+        Alert.alert('Error', 'Error al cargar información del usuario');
+        router.back();
+      } finally {
+        setLoadingUser(false);
+      }
+    };
+
+    loadUserData();
+  }, []);
 
   // Selector universal de imágenes
   const handleImagePicker = useCallback(async (type: 'gallery' | 'camera') => {
@@ -174,7 +291,10 @@ export default function CrearPostScreen() {
     if (modalLink.nombre.trim() && modalLink.url.trim()) {
       setFormData(prev => ({
         ...prev,
-        shoppingLinks: [...prev.shoppingLinks, { nombre: modalLink.nombre.trim(), url: modalLink.url.trim() }],
+        shoppingLinks: [...prev.shoppingLinks, { 
+          nombre: modalLink.nombre.trim(), 
+          url: modalLink.url.trim() 
+        }],
       }));
       setModalLink({ visible: false, nombre: '', url: '' });
     }
@@ -188,6 +308,12 @@ export default function CrearPostScreen() {
   };
 
   const handleSubmit = async () => {
+    // Verificar que tenemos el ID del usuario
+    if (!userData?._id) {
+      Alert.alert("Error", "No se pudo identificar al usuario. Por favor, inicia sesión nuevamente.");
+      return;
+    }
+
     const imagenesParaEnviar = Platform.OS === 'web'
       ? selectedFiles
       : formData.imagenesUris;
@@ -202,7 +328,7 @@ export default function CrearPostScreen() {
     try {
       const fd = new FormData();
 
-      fd.append("usuariaId", USUARIA_ID);
+      fd.append("usuariaId", userData._id);
       fd.append("descripcion", formData.descripcion);
       fd.append("etiqueta", formData.etiqueta);
       fd.append("tags", JSON.stringify(formData.tags));
@@ -242,12 +368,11 @@ export default function CrearPostScreen() {
         router.back();
       }
     } catch (err: any) {
-      Alert.alert("Error", err.message);
+      Alert.alert("Error", err.message || "Error de conexión");
     } finally {
       setLoading(false);
     }
   };
-
 
   const renderImages = () => {
     const images = Platform.OS === 'web'
@@ -280,12 +405,57 @@ export default function CrearPostScreen() {
     );
   };
 
-  const imageCount =
-    Platform.OS === 'web' ? selectedFiles.length : formData.imagenesUris.length;
+  const imageCount = Platform.OS === 'web' ? selectedFiles.length : formData.imagenesUris.length;
 
+  // Header con botón de regreso
+  const renderHeader = () => (
+    <View className="bg-white px-4 py-3 flex-row items-center border-b border-gray-200">
+      <TouchableOpacity 
+        onPress={() => router.back()} 
+        className="mr-3"
+      >
+        <ArrowLeftIcon size={24} color="#111827" />
+      </TouchableOpacity>
+      <Text className="text-lg font-semibold text-gray-900">Crear Nuevo Look</Text>
+    </View>
+  );
+
+  // Mostrar loading mientras se cargan los datos del usuario
+  if (loadingUser) {
+    return (
+      <View className="flex-1 bg-gray-50">
+        {renderHeader()}
+        <View className="flex-1 justify-center items-center">
+          <ActivityIndicator size="large" color="#000000" />
+          <Text className="mt-4 text-gray-600">Cargando información del usuario...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Si no hay usuario, no renderizar el formulario
+  if (!userData) {
+    return (
+      <View className="flex-1 bg-gray-50">
+        {renderHeader()}
+        <View className="flex-1 justify-center items-center px-4">
+          <Text className="text-gray-600 text-center mb-4">
+            Error: No se pudo cargar la información del usuario
+          </Text>
+          <TouchableOpacity 
+            onPress={() => router.back()} 
+            className="bg-gray-900 px-6 py-3 rounded-lg"
+          >
+            <Text className="text-white font-medium">Volver</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-gray-50">
+      {renderHeader()}
 
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 40 }}>
         {/* IMÁGENES */}
@@ -326,7 +496,7 @@ export default function CrearPostScreen() {
           )}
         </View>
 
-        {/* RESTO DEL FORMULARIO */}
+        {/* DESCRIPCIÓN */}
         <View className="p-4 bg-white mb-3">
           <Text className="text-base font-semibold text-gray-900 mb-2">Descripción</Text>
           <TextInput
@@ -336,20 +506,22 @@ export default function CrearPostScreen() {
             multiline
             maxLength={300}
             className="h-28 p-3 border border-gray-200 rounded-lg text-gray-900 text-sm"
-            style={{ textAlignVertical: 'top' as any }}
+            style={{ textAlignVertical: 'top' }}
+            placeholderTextColor="#9CA3AF"
           />
           <Text className="text-xs text-gray-400 text-right mt-1">
             {formData.descripcion.length}/300
           </Text>
         </View>
 
+        {/* TIPO DE LOOK */}
         <View className="p-4 bg-white mb-3">
           <Text className="text-base font-semibold text-gray-900 mb-2">Tipo de look</Text>
           <View className="flex-row gap-2">
             {ETIQUETAS.map((etiqueta) => (
               <TouchableOpacity
                 key={etiqueta}
-                onPress={() => setFormData((prev) => ({ ...prev, etiqueta }))}
+                onPress={() => setFormData((prev) => ({ ...prev, etiqueta: etiqueta as any }))}
                 className={`flex-1 py-2 rounded-lg items-center ${
                   formData.etiqueta === etiqueta ? 'bg-gray-900' : 'bg-gray-100'
                 }`}
@@ -366,7 +538,7 @@ export default function CrearPostScreen() {
           </View>
         </View>
 
-        {/* Etiquetas */}
+        {/* ETIQUETAS */}
         <View className="p-4 bg-white mb-3">
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-base font-semibold text-gray-900">Etiquetas</Text>
@@ -396,10 +568,14 @@ export default function CrearPostScreen() {
           </View>
         </View>
 
-        {/* Colecciones */}
+        {/* COLECCIONES */}
         <View className="p-4 bg-white mb-3">
           <Text className="text-base font-semibold text-gray-900 mb-2">Colecciones</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-2">
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            className="flex-row gap-2"
+          >
             {COLECCIONES_PREDEFINIDAS.map((item) => (
               <TouchableOpacity
                 key={item}
@@ -424,10 +600,10 @@ export default function CrearPostScreen() {
           </ScrollView>
         </View>
 
-        {/* Enlaces */}
+        {/* ENLACES DE COMPRA */}
         <View className="p-4 bg-white mb-3">
           <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-base font-semibold text-gray-900">Enlaces</Text>
+            <Text className="text-base font-semibold text-gray-900">Enlaces de compra</Text>
             <TouchableOpacity
               onPress={() => setModalLink((prev) => ({ ...prev, visible: true }))}
               className="flex-row items-center bg-gray-100 px-3 py-1.5 rounded-full"
@@ -477,14 +653,12 @@ export default function CrearPostScreen() {
         </View>
       </ScrollView>
 
-      {/* MODAL TAG */}
+      {/* MODAL ETIQUETA */}
       <Modal
         animationType="fade"
         transparent
         visible={modalTag.visible}
-        onRequestClose={() =>
-          setModalTag((prev) => ({ ...prev, visible: false }))
-        }
+        onRequestClose={() => setModalTag((prev) => ({ ...prev, visible: false }))}
       >
         <View className="flex-1 justify-center items-center bg-black/50">
           <View className="bg-white rounded-xl p-5 w-11/12 max-w-sm">
@@ -495,12 +669,11 @@ export default function CrearPostScreen() {
               onChangeText={(text) => setModalTag((prev) => ({ ...prev, value: text }))}
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4"
               autoFocus
+              placeholderTextColor="#9CA3AF"
             />
             <View className="flex-row gap-3">
               <TouchableOpacity
-                onPress={() =>
-                  setModalTag({ visible: false, value: '' })
-                }
+                onPress={() => setModalTag({ visible: false, value: '' })}
                 className="flex-1 py-2 border border-gray-300 rounded-lg"
               >
                 <Text className="text-gray-700 text-center text-sm font-medium">
@@ -524,14 +697,12 @@ export default function CrearPostScreen() {
         </View>
       </Modal>
 
-      {/* MODAL LINK */}
+      {/* MODAL ENLACE */}
       <Modal
         animationType="fade"
         transparent
         visible={modalLink.visible}
-        onRequestClose={() =>
-          setModalLink({ visible: false, nombre: '', url: '' })
-        }
+        onRequestClose={() => setModalLink({ visible: false, nombre: '', url: '' })}
       >
         <View className="flex-1 justify-center items-center bg-black/50">
           <View className="bg-white rounded-xl p-5 w-11/12 max-w-sm">
@@ -546,6 +717,7 @@ export default function CrearPostScreen() {
                 setModalLink((prev) => ({ ...prev, nombre: text }))
               }
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-3"
+              placeholderTextColor="#9CA3AF"
             />
 
             <TextInput
@@ -557,13 +729,12 @@ export default function CrearPostScreen() {
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4"
               keyboardType="url"
               autoCapitalize="none"
+              placeholderTextColor="#9CA3AF"
             />
 
             <View className="flex-row gap-3">
               <TouchableOpacity
-                onPress={() =>
-                  setModalLink({ visible: false, nombre: '', url: '' })
-                }
+                onPress={() => setModalLink({ visible: false, nombre: '', url: '' })}
                 className="flex-1 py-2 border border-gray-300 rounded-lg"
               >
                 <Text className="text-gray-700 text-center text-sm font-medium">

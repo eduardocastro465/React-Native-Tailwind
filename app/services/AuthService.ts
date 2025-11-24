@@ -15,6 +15,7 @@ export interface ISignInRequest {
   email?: string;
   telefono?: string;
   password?: string;
+  // El token del captcha se incluye en esta interfaz.
   captchaToken?: string;
 }
 
@@ -57,6 +58,8 @@ export const AuthService = {
 
   async signIn(request: ISignInRequest): Promise<IToken> {
     try {
+      // Aquí, el objeto `request` que se pasa desde la pantalla de login ya contiene el token del captcha.
+      // No necesitamos lógica adicional en este servicio.
       const response = await ApiService.post<IToken>('/autentificacion/signIn', request);
       if (response.token) {
         await this.saveToken(response.token);

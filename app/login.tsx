@@ -1,30 +1,16 @@
-// LoginScreen.tsx - Versión corregida usando AuthService
-
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, Image, Animated } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, Image, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { EyeIcon, EyeSlashIcon, ArrowLeftIcon, AtSymbolIcon, LockClosedIcon } from "react-native-heroicons/outline";
-import { AuthService, ISignInRequest } from './services/AuthService';
-
-// Componente FadeInView reemplazado con Animated
-const FadeInView = (props: { delay?: number; duration?: number; children: React.ReactNode; className?: string }) => {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: props.duration || 500,
-      delay: props.delay || 0,
-      useNativeDriver: true,
-    }).start();
-  }, [fadeAnim, props.delay, props.duration]);
-
-  return (
-    <Animated.View style={{ opacity: fadeAnim }} className={props.className}>
-      {props.children}
-    </Animated.View>
-  );
-};
+import { AuthService } from './services/AuthService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+interface UserData {
+  _id: string;
+  nombre: string;
+  email: string;
+  rol: string;
+  fotoDePerfil: string;
+}
 
 const LoginScreen: React.FC = () => {
   const router = useRouter();
@@ -67,83 +53,83 @@ const LoginScreen: React.FC = () => {
       return;
     }
 
-    if (!email || !password) {
-      setErrorMessage('Por favor, ingresa tu correo y contraseña.');
-      return;
-    }
-
     setIsLoading(true);
     setErrorMessage('');
 
     try {
-      console.log("Iniciando proceso de login...");
-      
-      const requestPayload: ISignInRequest = {
-        email: email.trim(),
-        password: password
+      const requestPayload = { email, password };
+      const response: any = await AuthService.signIn(requestPayload);
+
+      // El backend te regresa: { token, usuario }
+      if (!response.token || !response.usuario) {
+        setErrorMessage("Respuesta inválida del servidor.");
+        return;
+      }
+
+      const usuario: UserData = {
+        _id: response.usuario._id,
+        nombre: response.usuario.nombre,
+        email: response.usuario.email,
+        rol: response.usuario.rol,
+        fotoDePerfil: response.usuario.fotoDePerfil,
       };
 
-      const response = await AuthService.signIn(requestPayload);
-      
-      console.log("Login exitoso, redirigiendo...");
-      router.replace('/home');
-      
-    } catch (error: any) {
+      // Solo permitir acceso CLIENTE
+      if (usuario.rol !== "CLIENTE") {
+        setErrorMessage("No tienes permisos para acceder a esta sección.");
+        return;
+      }
+
+      // Guardar usuario + token
+      await AsyncStorage.setItem("userData", JSON.stringify(usuario));
+      await AsyncStorage.setItem("token", response.token);
+
+      console.log("Usuario CLIENTE logueado:", usuario);
+
+      // Ir al home
+      router.replace("/home");
+    }
+    catch (error: any) {
       console.error('Error en el login:', error);
       const status = error.status;
       let message = 'Ha ocurrido un error inesperado. Por favor, intenta de nuevo.';
 
-      if (status === 401) {
-        message = 'Credenciales inválidas. Verifica tu correo y contraseña.';
-        attemptsRef.current += 1;
-        if (attemptsRef.current >= 3) {
-          startCountdown(30); // Bloquea por 30 segundos después de 3 intentos
-        }
-      } else if (status === 403) {
+      if (status === 401) message = 'Credenciales inválidas. Verifica tu correo y contraseña.';
+      else if (status === 403) {
         message = error.error?.message || 'Cuenta bloqueada. Demasiados intentos fallidos.';
         const tiempoDeBloqueo = error.error?.tiempo;
         if (tiempoDeBloqueo) startCountdown(tiempoDeBloqueo);
-      } else if (status === 503) {
-        message = 'El servicio no está disponible. Por favor, inténtalo de nuevo más tarde.';
-      } else if (error.error?.message) {
-        message = error.error.message;
-      } else if (status === 0) {
-        message = 'Error de conexión. Por favor, verifica tu conexión a internet.';
-      }
+      } else if (status === 503) message = 'El servicio no está disponible. Por favor, inténtalo de nuevo más tarde.';
+      else if (error.error?.message) message = error.error.message;
 
       setErrorMessage(message);
-    } finally {
+    }
+    finally {
       setIsLoading(false);
     }
   };
 
+
+
+
   return (
     <SafeAreaView className="flex-1 bg-white">
-      
 
       <View className="flex-1 items-center justify-center p-6">
-        {/* Imagen con animación */}
-        <FadeInView delay={200} className="w-full max-w-sm aspect-square mb-2">
+        <View className="w-full max-w-sm aspect-square mb-2">
           <Image
             source={{ uri: 'https://res.cloudinary.com/dvvhnrvav/image/upload/v1746397789/shlcavwsffgxemctxdml.png' }}
             className="w-full h-full rounded-3xl"
-            resizeMode="contain"
+            resizeMode="cover"
           />
-        </FadeInView>
+        </View>
 
-        {/* Títulos con animación escalonada */}
-        <FadeInView delay={300}>
-          <Text className="text-4xl font-extrabold text-black mb-2 text-center">Inicia Sesión</Text>
-        </FadeInView>
+        <Text className="text-4xl font-extrabold text-black mb-2 text-center">Inicia Sesión</Text>
+        <Text className="text-base text-gray-500 mb-8 text-center max-w-xs">
+          Ingresa tus datos para acceder a tu cuenta y disfrutar de la aplicación.
+        </Text>
 
-        <FadeInView delay={400}>
-          <Text className="text-base text-gray-500 mb-8 text-center max-w-xs">
-            Ingresa tus datos para acceder a tu cuenta y disfrutar de la aplicación.
-          </Text>
-        </FadeInView>
-
-        {/* Formulario con animación */}
-        <FadeInView delay={500} className="w-full space-y-4 mb-4">
+        <View className="w-full space-y-4 mb-4">
           {/* Email */}
           <View>
             <Text className="text-sm font-medium text-gray-700 mb-1">Correo electrónico</Text>
@@ -157,7 +143,6 @@ const LoginScreen: React.FC = () => {
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
-                editable={!isLocked}
               />
             </View>
           </View>
@@ -174,49 +159,47 @@ const LoginScreen: React.FC = () => {
                 secureTextEntry={!showPassword}
                 value={password}
                 onChangeText={setPassword}
-                editable={!isLocked}
               />
-              <TouchableOpacity 
-                onPress={() => setShowPassword(!showPassword)} 
-                className="p-2"
-                disabled={isLocked}
-              >
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="p-2">
                 {showPassword ? <EyeIcon size={20} color="#6B7280" /> : <EyeSlashIcon size={20} color="#6B7280" />}
               </TouchableOpacity>
             </View>
           </View>
-        </FadeInView>
+        </View>
 
-        {/* Mensaje de error con animación */}
-        {errorMessage ? (
-          <FadeInView duration={500}>
-            <Text className="text-red-500 text-sm mb-4 text-center">{errorMessage}</Text>
-          </FadeInView>
-        ) : null}
+        {errorMessage ? <Text className="text-red-500 text-sm mb-4">{errorMessage}</Text> : null}
 
-        {/* Botón olvidé contraseña */}
-        <FadeInView delay={600}>
-          <TouchableOpacity className="self-end mb-6">
-            <Text className="text-sm font-medium text-black">¿Olvidaste tu contraseña?</Text>
-          </TouchableOpacity>
-        </FadeInView>
+        <TouchableOpacity className="self-end mb-6">
+          <Text className="text-sm font-medium text-black">¿Olvidaste tu contraseña?</Text>
+        </TouchableOpacity>
 
-        {/* Botón de login */}
-        <FadeInView delay={700} className="w-full">
-          <TouchableOpacity
-            className={`w-full h-14 bg-black justify-center items-center rounded-lg ${isLoading || isLocked ? 'opacity-50' : ''}`}
-            onPress={handleLogin}
-            disabled={isLoading || isLocked}
-          >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <Text className="text-white text-lg font-bold">
-                {isLocked ? `Bloqueado (${remainingTime}s)` : 'Entrar'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </FadeInView>
+        <TouchableOpacity
+          className={`w-full h-14 bg-black justify-center items-center rounded-lg ${isLoading || isLocked ? 'opacity-50' : ''}`}
+          onPress={handleLogin}
+          disabled={isLoading || isLocked}
+        >
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Text className="text-white text-lg font-bold">
+              {isLocked ? `Bloqueado (${remainingTime}s)` : 'Entrar'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Enlace de registro */}
+        <TouchableOpacity
+          className="mt-4"
+          onPress={() => {
+            // Abrir link en navegador
+            Linking.openURL('https://proyecto-atr.vercel.app/auth/Sign-up');
+          }}
+        >
+          <Text className="text-purple-600 text-center underline text-base">
+            ¿No tienes cuenta? Registrarme
+          </Text>
+        </TouchableOpacity>
+
       </View>
     </SafeAreaView>
   );

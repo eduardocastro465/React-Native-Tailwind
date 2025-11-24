@@ -20,13 +20,22 @@ import {
 import { PlusIcon, UserIcon, ChevronRightIcon } from "react-native-heroicons/outline";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { environment } from './environments/environment';
+import {jwtDecode} from "jwt-decode";
+
 // --- DIMENSIONES Y CONSTANTES ---
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COLUMN_GAP = 16;
 const CARD_WIDTH = (SCREEN_WIDTH - 48 - COLUMN_GAP) / 2;
 const CARD_MARGIN = 8;
 
-// --- INTERFACES Y DATOS DINÁMICOS ---
+// --- INTERFACES ---
+interface TokenPayload {
+    _id: string;
+    rol: string;
+    iat: number;
+    exp: number;
+}
+
 interface Usuaria {
     _id: string;
     nombre: string;
@@ -83,16 +92,30 @@ interface Post {
 }
 
 interface UserData {
-    _id: string;
-    nombre: string;
-    email: string;
-    rol: string;
-    fotoDePerfil: string;
+  _id: string;
+  nombre: string;
+  email: string;
+  rol: string;
+  fotoDePerfil: string;
 }
 
-const API_BASE_URL =environment.api+'/posts';
+const API_BASE_URL = environment.api + '/posts';
 
-// Servicio para obtener datos del usuario
+// CORREGIDO: Obtener ID del usuario desde el token
+const getUserIdFromToken = async (): Promise<string | null> => {
+    try {
+        const token = await AsyncStorage.getItem("token");
+        if (!token) return null;
+
+        const decoded = jwtDecode<TokenPayload>(token);
+        return decoded._id || null;
+    } catch (error) {
+        console.error("Error decodificando token:", error);
+        return null;
+    }
+};
+
+// CORREGIDO: Obtener datos completos del usuario
 const getUserData = async (): Promise<UserData | null> => {
     try {
         const userDataString = await AsyncStorage.getItem('userData');
@@ -156,23 +179,23 @@ const apiService = {
     },
 };
 
-// COMPARTIR URL O POST
-const handleShare = (postId?: string) => {
-    const baseUrl = 'https://atelier-play.en.aptoide.com';
-    const deepLink = postId
-        ? `atelierplay://post/${postId}`
-        : baseUrl;
+// COMPARTIR URL O POST - CORREGIDO
+const handleShare = async (post?: Post) => {
+    try {
+        const baseUrl = 'https://atelier-play.en.aptoide.com';
+        let message = `Descarga Atelier Play: ${baseUrl}`;
+        
+        if (post) {
+            const postUrl = `${baseUrl}/post/${post._id}`;
+            message = `Mira este post en Atelier Play: ${postUrl}\n\n${post.description}`;
+        }
 
-    const message = postId
-        ? `Mira este post en Atelier Play: ${deepLink}\n\nO descarga la app: ${baseUrl}`
-        : `Descarga Atelier Play: ${baseUrl}`;
-
-    if (postId) {
-        Linking.openURL(deepLink).catch(() => {
-            Linking.openURL(baseUrl);
+        await Share.share({
+            message,
+            title: 'Atelier Play'
         });
-    } else {
-        Linking.openURL(baseUrl);
+    } catch (error) {
+        console.error('Error al compartir:', error);
     }
 };
 
@@ -225,15 +248,9 @@ const PostCard: React.FC<{
         onLike(post._id);
     };
 
-    const handleShare = async () => {
-        try {
-            const postUrl = `https://atelier-play.en.aptoide.com/post/${post._id}`;
-            await Share.share({
-                message: `Mira este post en Atelier Play: ${postUrl}\n\n${post.description}`
-            });
-        } catch (error) {
-            console.error('Error al compartir:', error);
-        }
+    // FUNCIÓN DE COMPARTIR CORREGIDA
+    const handleSharePost = async () => {
+        await handleShare(post);
     };
 
     const getTimeAgo = () => {
@@ -347,7 +364,7 @@ const PostCard: React.FC<{
             {/* ACTION BUTTONS */}
             <View className="flex-row items-center justify-between p-3">
                 <View className="flex-row items-center">
-                    {/* LIKE BUTTON - USANDO DIRECTAMENTE LAS PROPS DEL POST */}
+                    {/* LIKE BUTTON */}
                     <TouchableOpacity
                         onPress={handleLike}
                         className="flex-row items-center mr-3"
@@ -373,8 +390,8 @@ const PostCard: React.FC<{
                         </Text>
                     </TouchableOpacity>
 
-                    {/* SHARE BUTTON */}
-                    <TouchableOpacity onPress={handleShare}>
+                    {/* SHARE BUTTON - CORREGIDO */}
+                    <TouchableOpacity onPress={handleSharePost}>
                         <Ionicons name="share-outline" size={16} color="#000000" />
                     </TouchableOpacity>
                 </View>
@@ -410,6 +427,7 @@ const PostCard: React.FC<{
     );
 };
 
+// ... (HeroSection, PromoCard, SeccionOption, MasonryLayout se mantienen igual)
 const HeroSection = () => {
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(1.1)).current;
@@ -476,7 +494,6 @@ const HeroSection = () => {
         </View>
     );
 };
-
 const PromoCard: React.FC = () => {
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -768,7 +785,6 @@ const MasonryLayout = ({ posts, onLike, onSave, onComment, onProfilePress, onPos
         </View>
     );
 };
-
 const PostDetailModal: React.FC<{
     post: Post | null;
     onClose: () => void;
@@ -799,15 +815,10 @@ const PostDetailModal: React.FC<{
         await onSave(post._id);
     };
 
+    // FUNCIÓN DE COMPARTIR EN MODAL CORREGIDA
     const handleShare = async () => {
         if (!post) return;
-        try {
-            await Share.share({
-                message: `Mira este post: ${post.description}`
-            });
-        } catch (error) {
-            console.error('Error al compartir:', error);
-        }
+        await handleShare(post);
     };
 
     const getTimeAgo = () => {
@@ -883,7 +894,6 @@ const PostDetailModal: React.FC<{
                         resizeMode="contain"
                     />
 
-                    {/* BOTONES DE LIKE Y COMPARTIR EN MODAL - USANDO PROPS DIRECTAMENTE */}
                     <View className="flex-row items-center justify-between p-4">
                         <View className="flex-row items-center gap-4">
                             <TouchableOpacity
@@ -900,6 +910,7 @@ const PostDetailModal: React.FC<{
                                 </Text>
                             </TouchableOpacity>
 
+                            {/* BOTÓN COMPARTIR EN MODAL - CORREGIDO */}
                             <TouchableOpacity
                                 onPress={handleShare}
                                 className="flex-row items-center gap-1"
@@ -950,21 +961,29 @@ const Home: React.FC = () => {
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-    // Obtener el ID del usuario actual al cargar el componente
+    // CORREGIDO: Obtener el ID del usuario desde el token
     useEffect(() => {
         const loadUserData = async () => {
             try {
-                const userData = await getUserData();
-                if (userData && userData._id) {
-                    setCurrentUserId(userData._id);
-                    console.log('User ID cargado:', userData._id);
+                const userId = await getUserIdFromToken();
+                if (userId) {
+                    setCurrentUserId(userId);
+                    console.log('User ID cargado desde token:', userId);
                 } else {
-                    console.log('No se encontraron datos del usuario');
-                    // Redirigir al login si no hay usuario
-                    router.push('/login');
+                    console.log('No se pudo obtener el ID del usuario desde el token');
+                    // También intentamos obtenerlo de userData como fallback
+                    const userData = await getUserData();
+                    if (userData && userData._id) {
+                        setCurrentUserId(userData._id);
+                        console.log('User ID cargado desde userData:', userData._id);
+                    } else {
+                        console.log('No se encontraron datos del usuario');
+                        router.push('/login');
+                    }
                 }
             } catch (error) {
                 console.error('Error cargando datos del usuario:', error);
+                router.push('/login');
             }
         };
 
@@ -984,7 +1003,6 @@ const Home: React.FC = () => {
             const apiPosts = await apiService.getApprovedPosts();
             console.log('Posts received:', apiPosts.length);
 
-            // Pasar el currentUserId a la función transformadora
             const transformedPosts = apiPosts.map(apiPost => transformApiPostToAppPost(apiPost, currentUserId));
             console.log('Transformed posts:', transformedPosts.length);
 
@@ -1009,14 +1027,13 @@ const Home: React.FC = () => {
         setRefreshing(false);
     }, [currentUserId]);
 
-    // CORRECCIÓN PRINCIPAL: Función que usa el currentUserId dinámico
+    // Función de like corregida
     const handleLikePost = useCallback(async (postId: string) => {
         if (!currentUserId) {
             console.error('No hay usuario autenticado');
             return;
         }
 
-        // Actualización optimista inmediata sin recargar toda la lista
         setPosts(prevPosts => {
             return prevPosts.map(post => {
                 if (post._id === postId) {
@@ -1042,7 +1059,6 @@ const Home: React.FC = () => {
                                 console.log('Error al actualizar like');
                             }
                         } catch (error) {
-                            // Revertir en caso de error
                             setPosts(currentPosts => currentPosts.map(p =>
                                 p._id === postId ? {
                                     ...p,

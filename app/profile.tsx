@@ -8,8 +8,9 @@ import {
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { environment } from './environments/environment';
+
 // CORREGIDO: Eliminé el espacio al final de la URL
-const API_URL =environment.api+'/posts';
+const API_URL = environment.api + '/posts';
 
 // Interfaces actualizadas según tu respuesta real
 interface Usuaria {
@@ -74,12 +75,55 @@ interface UserData {
   email?: string;
 }
 
+// CORRECCIÓN: Función para decodificar token manualmente (sin jwt-decode)
+const decodeToken = (token: string): any => {
+  try {
+    // Un JWT tiene 3 partes: header.payload.signature
+    const payloadBase64 = token.split('.')[1];
+    // Reemplazar caracteres URL-safe de Base64
+    const base64 = payloadBase64.replace(/-/g, '+').replace(/_/g, '/');
+    // Decodificar Base64
+    const payloadJson = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(payloadJson);
+  } catch (error) {
+    console.error('Error decodificando token manualmente:', error);
+    return null;
+  }
+};
+
+// CORRECCIÓN: Obtener ID del usuario desde token manualmente
+const getUserIdFromToken = async (): Promise<string | null> => {
+  try {
+    const token = await AsyncStorage.getItem("token");
+    console.log('Token from AsyncStorage:', token ? 'exists' : 'null');
+    
+    if (!token) return null;
+
+    const decoded = decodeToken(token);
+    console.log('Decoded token:', decoded);
+    
+    return decoded?._id || null;
+  } catch (error) {
+    console.error("Error decodificando token:", error);
+    return null;
+  }
+};
+
 // Servicio para obtener datos del usuario
 const getUserData = async (): Promise<UserData | null> => {
   try {
     const userDataString = await AsyncStorage.getItem('userData');
+    console.log('userDataString from AsyncStorage:', userDataString);
+    
     if (userDataString) {
-      return JSON.parse(userDataString);
+      const userData = JSON.parse(userDataString);
+      console.log('Parsed userData:', userData);
+      return userData;
     }
     return null;
   } catch (error) {
@@ -135,22 +179,40 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'publicaciones' | 'likes'>('publicaciones');
 
-  // Obtener el ID del usuario actual al cargar el componente
+  // CORRECCIÓN: Obtener el ID del usuario actual al cargar el componente
   useEffect(() => {
     const loadUserData = async () => {
       try {
+        console.log('Cargando datos del usuario...');
+        
+        // Primero intentar desde userData
         const userData = await getUserData();
+        console.log('UserData obtenido:', userData);
+        
         if (userData && userData._id) {
+          console.log('User ID cargado desde userData:', userData._id);
           setCurrentUserId(userData._id);
           setUserData(userData);
-          console.log('User ID cargado:', userData._id);
-        } else {
-          console.log('No se encontraron datos del usuario');
-          // Redirigir al login si no hay usuario
-          router.push('/login');
+          return;
         }
+
+        // Si no funciona, intentar desde el token
+        console.log('Intentando obtener ID desde token...');
+        const userIdFromToken = await getUserIdFromToken();
+        console.log('User ID desde token:', userIdFromToken);
+        
+        if (userIdFromToken) {
+          setCurrentUserId(userIdFromToken);
+          return;
+        }
+
+        // Si nada funciona, redirigir al login
+        console.log('No se pudo obtener el ID del usuario, redirigiendo al login');
+        router.push('/login');
+        
       } catch (error) {
         console.error('Error cargando datos del usuario:', error);
+        router.push('/login');
       }
     };
 
@@ -571,7 +633,7 @@ export default function ProfileScreen() {
           <TouchableOpacity 
             className="flex-1 py-3 bg-white border border-gray-900 rounded-lg items-center"
             activeOpacity={0.8}
-            onPress={() => router.push('/create-post')}
+            onPress={() => router.push('/crear-post')}
           >
             <Text className="text-sm font-semibold text-gray-900">
               Crear post
