@@ -9,9 +9,11 @@
     "scheme": "ateliermovil",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
       "package": "com.eduardoryt.ateliermovil",
       "googleServicesFile": "./google-services.json",
@@ -29,16 +31,19 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
+
     "plugins": [
       "expo-router",
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
+
       [
         "expo-camera",
         {
           "cameraPermission": "Esta app necesita acceder a tu cámara para tomar fotos."
         }
       ],
+
       [
         "expo-splash-screen",
         {
@@ -50,22 +55,27 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+
+      "expo-web-browser"
     ],
     "web": {
       "output": "static",
       "favicon": "./assets/atr.png"
     },
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
+
     "extra": {
       "router": {},
       "eas": {
         "projectId": "67653622-0813-43c6-bfd2-1495aef28755"
       }
     },
+
     "cli": {
       "appVersionSource": "source"
     }
