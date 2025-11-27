@@ -1,16 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, Text, TextInput, TouchableOpacity, SafeAreaView, 
-  ActivityIndicator, Image, Linking 
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { 
-  EyeIcon, EyeSlashIcon, AtSymbolIcon, LockClosedIcon 
+import React, { useState, useEffect, useRef } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  SafeAreaView,
+  ActivityIndicator,
+  Image,
+  Linking,
+} from "react-native";
+import { useRouter } from "expo-router";
+import {
+  EyeIcon,
+  EyeSlashIcon,
+  AtSymbolIcon,
+  LockClosedIcon,
 } from "react-native-heroicons/outline";
-import { AuthService } from './services/AuthService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import auth from '@react-native-firebase/auth';
+import { AuthService } from "./services/AuthService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import auth from "@react-native-firebase/auth";
+import {
+  GoogleSignin,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
+
+GoogleSignin.configure({
+  webClientId:
+    "452411722311-hb7jt2b3des48qvmtbsh91odhouijbb3.apps.googleusercontent.com",
+  offlineAccess: true,
+});
 
 interface UserData {
   _id: string;
@@ -22,24 +40,66 @@ interface UserData {
 
 const LoginScreen: React.FC = () => {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState("");
   const [isLocked, setIsLocked] = useState(false);
   const [remainingTime, setRemainingTime] = useState(0);
 
   const attemptsRef = useRef<number>(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<number | null>(null);
 
-  // Configurar Google
-  useEffect(() => {
-    GoogleSignin.configure({
-      webClientId: '834293716338-r6eovllbh7eq5ln06d10h7ov6udh92bd.apps.googleusercontent.com',
-    });
-  }, []);
+  // 🔥 GOOGLE LOGIN NATIVO (Firebase)
+  const loginWithGoogle = async () => {
+    try {
+      setIsGoogleLoading(true);
+      setErrorMessage("");
+
+      // Asegurar que está configurado
+      await GoogleSignin.hasPlayServices({
+        showPlayServicesUpdateDialog: true,
+      });
+
+      // Abrir el popup para elegir la cuenta
+      const userInfo = await GoogleSignin.signIn();
+
+      const idToken = userInfo.idToken;
+      if (!idToken) {
+        setErrorMessage("Google no regresó un idToken.");
+        return;
+      }
+
+      // Crear credencial
+      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+
+      // Iniciar sesión en Firebase
+      const userCredential =
+        await auth().signInWithCredential(googleCredential);
+
+      console.log("🔥 Usuario autenticado:", userCredential.user);
+
+      router.replace("/home");
+    } catch (error: any) {
+      console.log("Google Login Error:", error);
+
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        setErrorMessage("El usuario canceló el inicio de sesión.");
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        setErrorMessage("Inicio de sesión en proceso...");
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        setErrorMessage(
+          "Google Play Services no está disponible o no está actualizado."
+        );
+      } else {
+        setErrorMessage("Error en el inicio de sesión.");
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -52,7 +112,7 @@ const LoginScreen: React.FC = () => {
     setIsLocked(true);
 
     timerRef.current = setInterval(() => {
-      setRemainingTime(prev => {
+      setRemainingTime((prev) => {
         if (prev <= 1) {
           clearInterval(timerRef.current!);
           setIsLocked(false);
@@ -64,32 +124,6 @@ const LoginScreen: React.FC = () => {
     }, 1000);
   };
 
-  // LOGIN GOOGLE
-  async function onGoogleButtonPress() {
-    setIsGoogleLoading(true);
-    setErrorMessage('');
-
-    try {
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      const googleUserInfo = await GoogleSignin.signIn();
-      const googleCredential = auth.GoogleAuthProvider.credential(googleUserInfo.idToken);
-      const firebaseUser = await auth().signInWithCredential(googleCredential);
-      const firebaseIdToken = await auth().currentUser?.getIdToken();
-
-      if (!firebaseIdToken) throw new Error('No se pudo obtener token');
-
-      console.log("Google User:", firebaseUser.user.toJSON());
-
-      router.replace("/home");
-    } catch (error: any) {
-      console.error('Error Google:', error);
-      setErrorMessage('Error al iniciar sesión con Google.');
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  }
-
-  // LOGIN NORMAL
   const handleLogin = async () => {
     if (isLocked) {
       setErrorMessage(`Demasiados intentos. Intenta en ${remainingTime} s.`);
@@ -97,7 +131,7 @@ const LoginScreen: React.FC = () => {
     }
 
     setIsLoading(true);
-    setErrorMessage('');
+    setErrorMessage("");
 
     try {
       const response: any = await AuthService.signIn({ email, password });
@@ -124,23 +158,20 @@ const LoginScreen: React.FC = () => {
       await AsyncStorage.setItem("token", response.token);
 
       router.replace("/home");
-    }
-    catch (error: any) {
-      console.error('Login:', error);
+    } catch (error: any) {
+      console.error("Login:", error);
       const status = error.status;
       let msg = "Error inesperado.";
 
-      if (status === 401) msg = 'Credenciales inválidas.';
+      if (status === 401) msg = "Credenciales inválidas.";
       else if (status === 403) {
-        msg = error.error?.message || 'Cuenta bloqueada.';
+        msg = error.error?.message || "Cuenta bloqueada.";
         if (error.error?.tiempo) startCountdown(error.error.tiempo);
-      }
-      else if (status === 503) msg = 'Servicio no disponible.';
+      } else if (status === 503) msg = "Servicio no disponible.";
       else if (error.error?.message) msg = error.error.message;
 
       setErrorMessage(msg);
-    }
-    finally {
+    } finally {
       setIsLoading(false);
     }
   };
@@ -148,28 +179,32 @@ const LoginScreen: React.FC = () => {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-1 items-center justify-center p-6">
-
         {/* Imagen */}
         <View className="w-full max-w-sm aspect-square mb-2">
           <Image
-            source={{ uri: 'https://res.cloudinary.com/dvvhnrvav/image/upload/v1746397789/shlcavwsffgxemctxdml.png' }}
+            source={{
+              uri: "https://res.cloudinary.com/dvvhnrvav/image/upload/v1746397789/shlcavwsffgxemctxdml.png",
+            }}
             className="w-full h-full rounded-3xl"
             resizeMode="cover"
           />
         </View>
 
-        {/* Texto */}
-        <Text className="text-4xl font-extrabold text-black mb-2 text-center">Inicia Sesión</Text>
+        {/* Título */}
+        <Text className="text-4xl font-extrabold text-black mb-2 text-center">
+          Inicia Sesión
+        </Text>
         <Text className="text-base text-gray-500 mb-6 text-center max-w-xs">
           Ingresa tus datos para acceder a tu cuenta.
         </Text>
 
         {/* Inputs */}
         <View className="w-full space-y-4 mb-4">
-
           {/* Email */}
           <View>
-            <Text className="text-sm font-medium text-gray-700 mb-1">Correo electrónico</Text>
+            <Text className="text-sm font-medium text-gray-700 mb-1">
+              Correo electrónico
+            </Text>
             <View className="flex-row items-center bg-gray-50 border border-gray-300 rounded-lg px-4 h-14">
               <AtSymbolIcon size={20} color="#6B7280" />
               <TextInput
@@ -186,7 +221,9 @@ const LoginScreen: React.FC = () => {
 
           {/* Contraseña */}
           <View>
-            <Text className="text-sm font-medium text-gray-700 mb-1">Contraseña</Text>
+            <Text className="text-sm font-medium text-gray-700 mb-1">
+              Contraseña
+            </Text>
             <View className="flex-row items-center bg-gray-50 border border-gray-300 rounded-lg px-4 h-14">
               <LockClosedIcon size={20} color="#6B7280" />
               <TextInput
@@ -198,28 +235,27 @@ const LoginScreen: React.FC = () => {
                 onChangeText={setPassword}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                {showPassword 
-                  ? <EyeIcon size={20} color="#6B7280" /> 
-                  : <EyeSlashIcon size={20} color="#6B7280" />}
+                {showPassword ? (
+                  <EyeIcon size={20} color="#6B7280" />
+                ) : (
+                  <EyeSlashIcon size={20} color="#6B7280" />
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        {/* Mensaje error */}
+        {/* Error */}
         {errorMessage ? (
-          <Text className="text-red-500 text-sm mb-4 text-center">{errorMessage}</Text>
+          <Text className="text-red-500 text-sm mb-4 text-center">
+            {errorMessage}
+          </Text>
         ) : null}
 
-        {/* Recuperar contraseña */}
-        <TouchableOpacity className="self-end mb-4">
-          <Text className="text-sm font-medium text-black">¿Olvidaste tu contraseña?</Text>
-        </TouchableOpacity>
-
-        {/* BOTÓN LOGIN */}
+        {/* Login */}
         <TouchableOpacity
           className={`w-full h-14 bg-black rounded-lg justify-center items-center mb-4 ${
-            isLoading || isLocked ? 'opacity-50' : ''
+            isLoading || isLocked ? "opacity-50" : ""
           }`}
           onPress={handleLogin}
           disabled={isLoading || isLocked}
@@ -228,17 +264,17 @@ const LoginScreen: React.FC = () => {
             <ActivityIndicator color="#fff" />
           ) : (
             <Text className="text-white text-lg font-bold">
-              {isLocked ? `Bloqueado (${remainingTime}s)` : 'Entrar'}
+              {isLocked ? `Bloqueado (${remainingTime}s)` : "Entrar"}
             </Text>
           )}
         </TouchableOpacity>
 
-        {/* GOOGLE LOGIN */}
+        {/* Google */}
         <TouchableOpacity
           className={`w-full h-14 bg-white border border-gray-300 rounded-lg flex-row items-center justify-center mb-6 ${
-            isGoogleLoading ? 'opacity-50' : ''
+            isGoogleLoading ? "opacity-50" : ""
           }`}
-          onPress={onGoogleButtonPress}
+          onPress={loginWithGoogle}
           disabled={isGoogleLoading}
         >
           {isGoogleLoading ? (
@@ -246,22 +282,31 @@ const LoginScreen: React.FC = () => {
           ) : (
             <>
               <Image
-                source={{ uri: 'https://developers.google.com/identity/images/g-logo.png' }}
+                source={{
+                  uri: "https://developers.google.com/identity/images/g-logo.png",
+                }}
                 className="w-6 h-6 mr-3"
               />
-              <Text className="text-gray-700 text-lg font-bold">Continuar con Google</Text>
+              <Text className="text-gray-700 text-lg font-bold">
+                Continuar con Google
+              </Text>
             </>
           )}
         </TouchableOpacity>
 
-        {/* ✔ Enlace registro centrado, pequeño y profesional */}
+        {/* Registro */}
         <View className="flex-row justify-center mt-2">
           <Text className="text-gray-500 text-sm">¿No tienes cuenta? </Text>
-          <TouchableOpacity onPress={() => Linking.openURL("https://proyecto-atr.vercel.app/auth/Sign-up")}>
-            <Text className="text-purple-600 underline font-semibold text-sm">Regístrate aquí</Text>
+          <TouchableOpacity
+            onPress={() =>
+              Linking.openURL("https://proyecto-atr.vercel.app/auth/Sign-up")
+            }
+          >
+            <Text className="text-purple-600 underline font-semibold text-sm">
+              Regístrate aquí
+            </Text>
           </TouchableOpacity>
         </View>
-
       </View>
     </SafeAreaView>
   );
