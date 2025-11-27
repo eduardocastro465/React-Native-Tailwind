@@ -1,0 +1,38 @@
+{
+  "project_info": {
+    "project_number": "494853694062",
+    "project_id": "ateliermovil-526ce",
+    "storage_bucket": "ateliermovil-526ce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:494853694062:android:403a102430fe91e1c0bc7f",
+        "android_client_info": {
+          "package_name": "com.eduardoryt.ateliermovil"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "494853694062-7h74ge3o8k0fjtoaqtvvpfehn1h3af3s.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.eduardoryt.ateliermovil",
+            "certificate_hash": "70a1af881cca9bc02b2655c10b7a554ad1aa6e42"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD3rhyHRlQzZ2qhE1GmuganLeQwkBOPhFM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
