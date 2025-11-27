@@ -18,7 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { environment } from './environments/environment';
+import { environment } from '../src/environments/environment';
 
 // --- INTERFACES ---
 interface PostFormData {

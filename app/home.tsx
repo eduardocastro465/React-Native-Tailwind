@@ -23,7 +23,7 @@ import {
   ChevronRightIcon,
 } from "react-native-heroicons/outline";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { environment } from "./environments/environment";
+import { environment } from "../src/environments/environment";
 import { jwtDecode } from "jwt-decode";
 
 

@@ -17,13 +17,9 @@ import {
   AtSymbolIcon,
   LockClosedIcon,
 } from "react-native-heroicons/outline";
-import { AuthService } from "./services/AuthService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import auth from "@react-native-firebase/auth";
-import {
-  GoogleSignin,
-  statusCodes,
-} from "@react-native-google-signin/google-signin";
+
+import { AuthService } from "../src/services/AuthService";
 
 interface UserData {
   _id: string;
@@ -33,97 +29,25 @@ interface UserData {
   fotoDePerfil: string;
 }
 
-const LoginScreen: React.FC = () => {
+const LoginScreen = () => {
   const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
   const [isLocked, setIsLocked] = useState(false);
   const [remainingTime, setRemainingTime] = useState(0);
 
   const attemptsRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
 
-  // ---------------------------------------------------------
-  // 1. CONFIGURACIÓN SEGURA DE GOOGLE SIGNIN
-  // ---------------------------------------------------------
-  useEffect(() => {
-    // Solo intentamos configurar si NO estamos en web para evitar errores
-    if (Platform.OS !== 'web') {
-      try {
-        GoogleSignin.configure({
-          webClientId:
-            "452411722311-hb7jt2b3des48qvmtbsh91odhouijbb3.apps.googleusercontent.com",
-          offlineAccess: true,
-        });
-      } catch (error) {
-        console.warn("GoogleSignin no se pudo configurar (Probablemente estás en Expo Go standard):", error);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
-
-  // 🔥 GOOGLE LOGIN NATIVO (Firebase)
-  const loginWithGoogle = async () => {
-    if (Platform.OS === 'web') {
-      setErrorMessage("El inicio con Google nativo no está disponible en Web.");
-      return;
-    }
-
-    try {
-      setIsGoogleLoading(true);
-      setErrorMessage("");
-
-      // Asegurar que está configurado
-      await GoogleSignin.hasPlayServices({
-        showPlayServicesUpdateDialog: true,
-      });
-
-      // Abrir el popup para elegir la cuenta
-      const userInfo = await GoogleSignin.signIn();
-
-      const idToken = userInfo.idToken;
-      if (!idToken) {
-        setErrorMessage("Google no regresó un idToken.");
-        return;
-      }
-
-      // Crear credencial
-      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-
-      // Iniciar sesión en Firebase
-      const userCredential = await auth().signInWithCredential(googleCredential);
-
-      console.log("🔥 Usuario autenticado:", userCredential.user);
-
-      router.replace("/home");
-    } catch (error: any) {
-      console.log("Google Login Error:", error);
-
-      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
-        setErrorMessage("El usuario canceló el inicio de sesión.");
-      } else if (error.code === statusCodes.IN_PROGRESS) {
-        setErrorMessage("Inicio de sesión en proceso...");
-      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        setErrorMessage(
-          "Google Play Services no está disponible o no está actualizado."
-        );
-      } else {
-        // Mensaje genérico si falla por no tener Dev Client
-        setErrorMessage("Error: Verifica que estés usando un Development Build.");
-      }
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
+  // =====================================================
+  //              BLOQUEO DE INTENTOS
+  // =====================================================
 
   const startCountdown = (lockTime: number) => {
     setRemainingTime(lockTime);
@@ -141,6 +65,10 @@ const LoginScreen: React.FC = () => {
       });
     }, 1000);
   };
+
+  // =====================================================
+  //           LOGIN NORMAL CORREO + PASSWORD
+  // =====================================================
 
   const handleLogin = async () => {
     if (isLocked) {
@@ -168,7 +96,7 @@ const LoginScreen: React.FC = () => {
       };
 
       if (usuario.rol !== "CLIENTE") {
-        setErrorMessage("No tienes permisos para acceder.");
+        setErrorMessage("No tienes permisos.");
         return;
       }
 
@@ -178,21 +106,23 @@ const LoginScreen: React.FC = () => {
       router.replace("/home");
     } catch (error: any) {
       console.error("Login:", error);
-      const status = error.status;
       let msg = "Error inesperado.";
 
-      if (status === 401) msg = "Credenciales inválidas.";
-      else if (status === 403) {
+      if (error.status === 401) msg = "Credenciales inválidas.";
+      else if (error.status === 403) {
         msg = error.error?.message || "Cuenta bloqueada.";
         if (error.error?.tiempo) startCountdown(error.error.tiempo);
-      } else if (status === 503) msg = "Servicio no disponible.";
-      else if (error.error?.message) msg = error.error.message;
+      }
 
       setErrorMessage(msg);
     } finally {
       setIsLoading(false);
     }
   };
+
+  // =====================================================
+  //                      UI
+  // =====================================================
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -208,12 +138,8 @@ const LoginScreen: React.FC = () => {
           />
         </View>
 
-        {/* Título */}
         <Text className="text-4xl font-extrabold text-black mb-2 text-center">
           Inicia Sesión
-        </Text>
-        <Text className="text-base text-gray-500 mb-6 text-center max-w-xs">
-          Ingresa tus datos para acceder a tu cuenta.
         </Text>
 
         {/* Inputs */}
@@ -270,7 +196,7 @@ const LoginScreen: React.FC = () => {
           </Text>
         ) : null}
 
-        {/* Login */}
+        {/* Login normal */}
         <TouchableOpacity
           className={`w-full h-14 bg-black rounded-lg justify-center items-center mb-4 ${
             isLoading || isLocked ? "opacity-50" : ""
@@ -287,40 +213,14 @@ const LoginScreen: React.FC = () => {
           )}
         </TouchableOpacity>
 
-        {/* Google */}
-        <TouchableOpacity
-          className={`w-full h-14 bg-white border border-gray-300 rounded-lg flex-row items-center justify-center mb-6 ${
-            isGoogleLoading ? "opacity-50" : ""
-          }`}
-          onPress={loginWithGoogle}
-          disabled={isGoogleLoading}
-        >
-          {isGoogleLoading ? (
-            <ActivityIndicator color="#666" />
-          ) : (
-            <>
-              <Image
-                source={{
-                  uri: "https://developers.google.com/identity/images/g-logo.png",
-                }}
-                className="w-6 h-6 mr-3"
-              />
-              <Text className="text-gray-700 text-lg font-bold">
-                Continuar con Google
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Registro */}
         <View className="flex-row justify-center mt-2">
-          <Text className="text-gray-500 text-sm">¿No tienes cuenta? </Text>
+          <Text className="text-gray-500 text-sm">¿No tienes cuenta?</Text>
           <TouchableOpacity
             onPress={() =>
               Linking.openURL("https://proyecto-atr.vercel.app/auth/Sign-up")
             }
           >
-            <Text className="text-purple-600 underline font-semibold text-sm">
+            <Text className="text-purple-600 underline font-semibold text-sm ml-1">
               Regístrate aquí
             </Text>
           </TouchableOpacity>

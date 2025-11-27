@@ -9,8 +9,6 @@ import {
 } from "react-native";
 import { useEffect, useRef } from "react";
 
-
-
 export default function Index() {
   const router = useRouter();
 

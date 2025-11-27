@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { environment } from './environments/environment';
+import { environment } from '../src/environments/environment';
 
 // CORREGIDO: Eliminé el espacio al final de la URL
 const API_URL = environment.api + '/posts';
