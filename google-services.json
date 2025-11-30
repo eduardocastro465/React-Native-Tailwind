@@ -1,35 +1,36 @@
 {
   "project_info": {
-    "project_number": "494853694062",
-    "project_id": "ateliermovil-526ce",
-    "storage_bucket": "ateliermovil-526ce.firebasestorage.app"
+    "project_number": "801706699721",
+    "project_id": "mylogeo-3b4bf",
+    "storage_bucket": "mylogeo-3b4bf.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:494853694062:android:403a102430fe91e1c0bc7f",
+        "mobilesdk_app_id": "1:801706699721:android:17a7f411ad269f9d25d618",
         "android_client_info": {
-          "package_name": "com.eduardoryt.ateliermovil"
+          "package_name": "com.applooksocial11.mobile"
         }
       },
       "oauth_client": [
         {
-          "client_id": "494853694062-7h74ge3o8k0fjtoaqtvvpfehn1h3af3s.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.eduardoryt.ateliermovil",
-            "certificate_hash": "70a1af881cca9bc02b2655c10b7a554ad1aa6e42"
-          }
+          "client_id": "801706699721-kkft6hvkosqlv2s3it0gmssn98u1mah9.apps.googleusercontent.com",
+          "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyD3rhyHRlQzZ2qhE1GmuganLeQwkBOPhFM"
+          "current_key": "AIzaSyDeEjSfUI7mw7SSiqwRh0CrbveNi-ODStA"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "801706699721-kkft6hvkosqlv2s3it0gmssn98u1mah9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

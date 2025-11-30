@@ -21,12 +21,14 @@ import {
   PlusIcon,
   UserIcon,
   ChevronRightIcon,
+  ArrowLeftOnRectangleIcon,
 } from "react-native-heroicons/outline";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { environment } from "../src/environments/environment";
 import { jwtDecode } from "jwt-decode";
-
-
+import useLogout from "./hooks/useLogout";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import auth from "@react-native-firebase/auth";
 // --- DIMENSIONES Y CONSTANTES ---
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const COLUMN_GAP = 16;
@@ -658,39 +660,33 @@ const SeccionOption: React.FC = () => {
   const pathname = usePathname() || "/";
 
   const menuItems = [
-    {
-      title: "Crear Contenido",
-      subtitle: "Empieza un nuevo post",
-      path: "/crear-post",
-      Icon: PlusIcon,
-    },
-    {
-      title: "Administrar Perfil",
-      subtitle: "Ver y editar tu cuenta",
-      path: "/profile",
-      Icon: UserIcon,
-    },
+    { title: "Crear Contenido", subtitle: "Empieza un nuevo post", path: "/crear-post", Icon: PlusIcon },
+    { title: "Administrar Perfil", subtitle: "Ver y editar tu cuenta", path: "/profile", Icon: UserIcon },
   ];
 
-  const isActive = (path: string) => {
-    if (pathname === "/" && path === "/") return true;
-    if (path !== "/" && pathname.startsWith(path)) return true;
-    return false;
-  };
+  const isActive = (path: string) => (pathname === "/" && path === "/") || (path !== "/" && pathname.startsWith(path));
 
-  const handleNavigation = (path: string) => {
-    router.push(path);
+  const handleNavigation = (path: string) => router.push(path);
+
+  // ✅ Función de cierre de sesión
+  const logout = async () => {
+    try {
+      await auth().signOut();
+      const currentUser = await GoogleSignin.getCurrentUser();
+      if (currentUser) await GoogleSignin.signOut();
+      await AsyncStorage.removeItem("token");
+      await AsyncStorage.removeItem("userData");
+      router.push("/login");
+    } catch (error) {
+      console.log("Error al cerrar sesión:", error);
+    }
   };
 
   return (
     <View className="flex-1 bg-transparent">
-      <View className="px-6 py-6 mb-6 ">
-        <Text className="text-3xl font-bold text-gray-900 tracking-tight">
-          EXPLORAR
-        </Text>
-        <Text className="text-sm text-gray-600 mt-2 font-medium">
-          Navega y gestiona tu actividad
-        </Text>
+      <View className="px-6 py-6 mb-6">
+        <Text className="text-3xl font-bold text-gray-900 tracking-tight">EXPLORAR</Text>
+        <Text className="text-sm text-gray-600 mt-2 font-medium">Navega y gestiona tu actividad</Text>
       </View>
 
       <View className="px-5">
@@ -707,54 +703,49 @@ const SeccionOption: React.FC = () => {
           {menuItems.map(({ title, subtitle, path, Icon }, index) => {
             const active = isActive(path);
             const isLast = index === menuItems.length - 1;
-
             const itemClass = `
-                            flex-row items-center justify-between
-                            ${active ? "bg-gray-900" : "bg-white"} 
-                            ${!isLast ? "border-b border-gray-100" : ""}
-                            p-4 active:scale-[0.98] transition-transform duration-100
-                        `;
-
+              flex-row items-center justify-between
+              ${active ? "bg-gray-900" : "bg-white"}
+              ${!isLast ? "border-b border-gray-100" : ""}
+              p-4 active:scale-[0.98] transition-transform duration-100
+            `;
             const iconColor = active ? "#FFFFFF" : "#111827";
             const titleClass = active ? "text-white" : "text-gray-900";
             const subtitleClass = active ? "text-white/70" : "text-gray-500";
             const chevronColor = active ? "#FFFFFF" : "#9CA3AF";
 
             return (
-              <TouchableOpacity
-                key={path}
-                onPress={() => handleNavigation(path)}
-                className={itemClass}
-                activeOpacity={0.85}
-              >
+              <TouchableOpacity key={path} onPress={() => handleNavigation(path)} className={itemClass} activeOpacity={0.85}>
                 <View className="flex-row items-center flex-1">
-                  <View
-                    className={`
-                                        w-11 h-11 rounded-xl items-center justify-center mr-4
-                                        ${active ? "bg-white/10" : "bg-gray-100"}
-                                    `}
-                  >
+                  <View className={`w-11 h-11 rounded-xl items-center justify-center mr-4 ${active ? "bg-white/10" : "bg-gray-100"}`}>
                     <Icon size={22} color={iconColor} />
                   </View>
-
                   <View>
-                    <Text className={`text-base font-bold ${titleClass}`}>
-                      {title}
-                    </Text>
-                    <Text className={`text-xs mt-0.5 ${subtitleClass}`}>
-                      {subtitle}
-                    </Text>
+                    <Text className={`text-base font-bold ${titleClass}`}>{title}</Text>
+                    <Text className={`text-xs mt-0.5 ${subtitleClass}`}>{subtitle}</Text>
                   </View>
                 </View>
-
-                <ChevronRightIcon
-                  size={18}
-                  color={chevronColor}
-                  style={{ opacity: active ? 1 : 0.4 }}
-                />
+                <ChevronRightIcon size={18} color={chevronColor} style={{ opacity: active ? 1 : 0.4 }} />
               </TouchableOpacity>
             );
           })}
+
+          {/* 🔴 BOTÓN DE CERRAR SESIÓN */}
+          <TouchableOpacity
+            onPress={logout} // ✅ Llamamos la función directamente
+            activeOpacity={0.85}
+            className="flex-row items-center justify-center gap-3 p-5 bg-white border border-gray-200 rounded-xl mt-6"
+            style={{
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.12,
+              shadowRadius: 6,
+              elevation: 4,
+            }}
+          >
+            <ArrowLeftOnRectangleIcon size={22} color="#EF4444" className="mr-4" />
+            <Text className="text-red-500 font-bold text-base">Cerrar sesión</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -1114,10 +1105,10 @@ const Home: React.FC = () => {
                     currentPosts.map((p) =>
                       p._id === postId
                         ? {
-                            ...p,
-                            user_has_liked: post.user_has_liked,
-                            likes_count: post.likes_count,
-                          }
+                          ...p,
+                          user_has_liked: post.user_has_liked,
+                          likes_count: post.likes_count,
+                        }
                         : p
                     )
                   );
@@ -1128,10 +1119,10 @@ const Home: React.FC = () => {
                   currentPosts.map((p) =>
                     p._id === postId
                       ? {
-                          ...p,
-                          user_has_liked: post.user_has_liked,
-                          likes_count: post.likes_count,
-                        }
+                        ...p,
+                        user_has_liked: post.user_has_liked,
+                        likes_count: post.likes_count,
+                      }
                       : p
                   )
                 );

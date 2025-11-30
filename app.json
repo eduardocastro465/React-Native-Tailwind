@@ -2,10 +2,10 @@
   "expo": {
     "name": "AtelierLookSocial",
     "slug": "atelier-movil",
-    "owner": "tonidznico",
+    "owner": "driftspotky",
     "version": "1.0.0",
     "orientation": "portrait",
-  "icon": "./assets/atr.png",
+    "icon": "./assets/atr.png",
     "scheme": "ateliermovil",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -13,7 +13,8 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.eduardoryt.ateliermovil",
+      "package": "com.applooksocial11.mobile",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
@@ -34,6 +35,9 @@
     },
     "plugins": [
       "expo-router",
+      "@react-native-firebase/app",
+      "@react-native-google-signin/google-signin",
+      "@react-native-firebase/auth",
       [
         "expo-camera",
         {
@@ -53,7 +57,6 @@
         }
       ]
     ],
-
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
@@ -65,7 +68,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "ededfb1f-babb-444d-91c7-f1bb4d88ba75"
+        "projectId": "22b8ce0b-3888-4ccc-9809-7dc94432ad24"
       }
     },
     "cli": {
