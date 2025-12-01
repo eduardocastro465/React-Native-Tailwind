@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-// --- DEPENDENCIAS DE EXPO (Como en tu código anterior) ---
+// --- DEPENDENCIAS DE EXPO ---
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -38,7 +38,7 @@ interface UserData {
 }
 
 // --- CONFIG ---
-const API_URL = environment.api + '/posts';
+const API_URL = environment.api + '/posts/crear';
 const ETIQUETAS = ['propio', 'comprado', 'rentado'];
 const COLECCIONES_PREDEFINIDAS = ['Verano', 'Invierno', 'Ocasiones', 'Trabajo', 'Casual'];
 const MAX_IMAGENES = 10;
@@ -151,7 +151,7 @@ export default function CrearPostScreen() {
     }
   };
 
-  // 2. LÓGICA DE PERMISOS (Igual al código que funcionaba)
+  // 2. LÓGICA DE PERMISOS
   const requestPermissions = async () => {
     try {
       if (Platform.OS === 'web') {
@@ -190,6 +190,11 @@ export default function CrearPostScreen() {
       return;
     }
 
+    if (formData.imagenesUris.length >= MAX_IMAGENES) {
+      Alert.alert('Límite alcanzado', `Solo puedes subir hasta ${MAX_IMAGENES} imágenes.`);
+      return;
+    }
+
     setLoadingCamera(true);
     try {
       const result = await ImagePicker.launchCameraAsync({
@@ -219,26 +224,59 @@ export default function CrearPostScreen() {
     }
   };
 
-  // 4. FUNCIÓN: SELECCIONAR DE GALERÍA
-  const pickImage = async () => {
-    // Soporte Web específico (Input file)
+  // 4. FUNCIÓN: SELECCIONAR MÚLTIPLES IMÁGENES DE GALERÍA (CORREGIDO)
+  const pickMultipleImages = async () => {
+    // Verificar límite
+    const remainingSlots = MAX_IMAGENES - formData.imagenesUris.length;
+    if (remainingSlots <= 0) {
+      Alert.alert('Límite alcanzado', `Solo puedes subir hasta ${MAX_IMAGENES} imágenes.`);
+      return;
+    }
+
+    // Soporte Web específico (Input file múltiple)
     if (Platform.OS === 'web') {
       const input = document.createElement('input');
       input.type = 'file';
       input.multiple = true;
       input.accept = 'image/*';
+      
       input.onchange = (e: any) => {
+        if (!e.target.files) return;
+        
         const files = Array.from(e.target.files);
-        setFormData(prev => ({
-          ...prev,
-          imagenesUris: [...prev.imagenesUris, ...files.map((file: any) => URL.createObjectURL(file))]
-        }));
+        const newImages: string[] = [];
+        
+        // Procesar cada archivo
+        files.forEach((file: any) => {
+          if (formData.imagenesUris.length + newImages.length >= MAX_IMAGENES) {
+            return;
+          }
+          
+          const url = URL.createObjectURL(file);
+          newImages.push(url);
+        });
+        
+        if (newImages.length > 0) {
+          setFormData(prev => ({
+            ...prev,
+            imagenesUris: [...prev.imagenesUris, ...newImages]
+          }));
+        }
+        
+        // Mostrar mensaje si se excedió el límite
+        if (files.length > remainingSlots) {
+          Alert.alert(
+            'Límite parcial',
+            `Se seleccionaron ${files.length} imágenes pero solo se agregaron ${remainingSlots} debido al límite máximo.`
+          );
+        }
       };
+      
       input.click();
       return;
     }
 
-    // Soporte Móvil (Expo Image Picker)
+    // Soporte Móvil (Expo Image Picker con múltiple selección)
     if (hasPermission === false) {
       Alert.alert('Permiso denegado', 'Necesitas conceder permisos de galería.');
       return;
@@ -248,21 +286,24 @@ export default function CrearPostScreen() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
+        allowsMultipleSelection: true,
+        selectionLimit: remainingSlots, // Límite de selección basado en espacios restantes
+        orderedSelection: true,
         aspect: [4, 3],
         quality: 0.8,
-        // allowsMultipleSelection: true, // Descomentar si usas la versión nueva de Expo que lo soporta
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
+        const newUris = result.assets.map(asset => asset.uri);
+        
         setFormData(prev => ({
           ...prev,
-          imagenesUris: [...prev.imagenesUris, result.assets[0].uri]
+          imagenesUris: [...prev.imagenesUris, ...newUris]
         }));
       }
     } catch (error) {
-      console.error('Error seleccionando imagen:', error);
-      Alert.alert('Error', 'No se pudo seleccionar la imagen.');
+      console.error('Error seleccionando imágenes:', error);
+      Alert.alert('Error', 'No se pudieron seleccionar las imágenes.');
     } finally {
       setLoadingGallery(false);
     }
@@ -273,13 +314,23 @@ export default function CrearPostScreen() {
     try {
       if (Platform.OS !== 'web') {
         const asset = await MediaLibrary.createAssetAsync(uri);
-        // Opcional: Avisar al usuario
-        // Alert.alert('Éxito', 'Foto guardada en tu galería'); 
         return asset;
       }
     } catch (error) {
       console.error('Error guardando en galería:', error);
     }
+  };
+
+  // 6. FUNCIÓN: ARRASTRAR Y SOLTAR PARA REORDENAR (Opcional)
+  const reorderImages = (fromIndex: number, toIndex: number) => {
+    const newImages = [...formData.imagenesUris];
+    const [removed] = newImages.splice(fromIndex, 1);
+    newImages.splice(toIndex, 0, removed);
+    
+    setFormData(prev => ({
+      ...prev,
+      imagenesUris: newImages
+    }));
   };
 
   // --- RESTO DE FUNCIONES (Tags, Links, Submit) ---
@@ -331,15 +382,18 @@ export default function CrearPostScreen() {
     }));
   };
 
+  // 7. FUNCIÓN: ENVIAR POST CON MÚLTIPLES IMÁGENES
   const handleSubmit = async () => {
     if (!userData?._id) {
       Alert.alert("Error", "No se pudo identificar al usuario.");
       return;
     }
+    
     if (formData.imagenesUris.length === 0) {
       Alert.alert("Error", "Debes seleccionar al menos una imagen.");
       return;
     }
+
     setLoadingSubmit(true);
     try {
       const fd = new FormData();
@@ -349,51 +403,95 @@ export default function CrearPostScreen() {
       fd.append("tags", JSON.stringify(formData.tags));
       fd.append("collections", JSON.stringify(formData.collections));
       fd.append("shoppingLinks", JSON.stringify(formData.shoppingLinks));
+      
+      // Agregar TODAS las imágenes al FormData
       formData.imagenesUris.forEach((uri, index) => {
-        fd.append("imagenes", {
-          uri: uri,
-          name: `img_${Date.now()}_${index}.jpg`,
-          type: "image/jpeg",
-        } as any);
+        // Para web, necesitamos convertir la URL a Blob
+        if (Platform.OS === 'web') {
+          // En web, las URIs son blob URLs, necesitamos convertirlas a File
+          fetch(uri)
+            .then(res => res.blob())
+            .then(blob => {
+              const file = new File([blob], `img_${Date.now()}_${index}.jpg`, { type: "image/jpeg" });
+              fd.append("imagenes", file);
+            });
+        } else {
+          // Para móvil (iOS/Android)
+          fd.append("imagenes", {
+            uri: uri,
+            name: `img_${Date.now()}_${index}.jpg`,
+            type: "image/jpeg",
+          } as any);
+        }
       });
+
       const res = await fetch(API_URL, {
         method: "POST",
         body: fd,
+        headers: Platform.OS === 'web' ? {} : {
+          'Content-Type': 'multipart/form-data',
+        },
       });
+
       const json = await res.json();
+      
       if (!res.ok) {
         Alert.alert("Error", json.error || "Error al publicar");
       } else {
-        Alert.alert("Éxito", "Look publicado correctamente");
-        router.back();
+        Alert.alert(
+          "¡Éxito!",
+          `Look publicado correctamente con ${formData.imagenesUris.length} ${formData.imagenesUris.length === 1 ? 'imagen' : 'imágenes'}.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
       }
     } catch (err: any) {
+      console.error('Error al enviar:', err);
       Alert.alert("Error", err.message || "Error de conexión");
     } finally {
       setLoadingSubmit(false);
     }
   };
+
+  // 8. RENDERIZADO DE IMÁGENES CON MEJOR UI
   const renderImages = () => (
     <View className="flex-row flex-wrap">
       {formData.imagenesUris.map((uri, index) => (
         <View key={index} className="relative mb-3 mr-3">
-          <Image
-            source={{ uri }}
-            className="w-24 h-24 rounded-lg"
-            resizeMode="cover"
-          />
+          <View className="relative">
+            <Image
+              source={{ uri }}
+              className="w-24 h-24 rounded-lg"
+              resizeMode="cover"
+            />
+            {/* Badge con número de imagen */}
+            <View className="absolute top-1 left-1 bg-black/60 rounded-full w-6 h-6 items-center justify-center">
+              <Text className="text-white text-xs font-bold">{index + 1}</Text>
+            </View>
+          </View>
           <TouchableOpacity
             onPress={() => handleRemoveImage(index)}
-            className="absolute -top-2 -right-2 bg-red-500 rounded-full w-7 h-7 items-center justify-center"
+            className="absolute -top-2 -right-2 bg-red-500 rounded-full w-7 h-7 items-center justify-center shadow-sm"
           >
             <Ionicons name="close-circle" size={16} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       ))}
+      
       {formData.imagenesUris.length === 0 && (
-        <Text className="text-gray-400 text-sm italic text-center py-4 w-full">
-          No hay imágenes seleccionadas
-        </Text>
+        <View className="w-full items-center justify-center py-8">
+          <Ionicons name="images-outline" size={48} color="#D1D5DB" />
+          <Text className="text-gray-400 text-sm italic text-center mt-2">
+            No hay imágenes seleccionadas
+          </Text>
+          <Text className="text-gray-400 text-xs text-center mt-1">
+            Toca "Galería" para seleccionar múltiples imágenes
+          </Text>
+        </View>
       )}
     </View>
   );
@@ -415,11 +513,33 @@ export default function CrearPostScreen() {
     <View className="flex-1 bg-gray-50">
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 40 }}>
 
+        {/* HEADER */}
+        <View className="bg-white px-4 py-3 flex-row justify-between items-center border-b border-gray-200">
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#111827" />
+          </TouchableOpacity>
+          <Text className="text-lg font-semibold text-gray-900">Crear Post</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
         {/* SECCIÓN DE IMÁGENES */}
-        <View className="p-4 bg-white mb-3">
+        <View className="p-4 bg-white mb-3 mt-2">
           <View className="flex-row justify-between items-center mb-3">
-            <Text className="text-base font-semibold text-gray-900">Imágenes</Text>
-            <Text className="text-xs text-gray-500">{imageCount}/{MAX_IMAGENES}</Text>
+            <View>
+              <Text className="text-base font-semibold text-gray-900">Imágenes</Text>
+              <Text className="text-xs text-gray-500 mt-1">
+                {imageCount > 0 ? `${imageCount} de ${MAX_IMAGENES} imágenes` : `Máximo ${MAX_IMAGENES} imágenes`}
+              </Text>
+            </View>
+            {imageCount > 0 && (
+              <TouchableOpacity
+                onPress={() => setFormData(prev => ({ ...prev, imagenesUris: [] }))}
+                className="flex-row items-center bg-red-50 px-3 py-1.5 rounded-full"
+              >
+                <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                <Text className="text-red-600 text-xs font-medium ml-1">Eliminar todas</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {renderImages()}
@@ -427,20 +547,19 @@ export default function CrearPostScreen() {
           {/* BOTONES DE CÁMARA Y GALERÍA */}
           {imageCount < MAX_IMAGENES && (
             <View className="flex-row gap-3 mt-3">
-
-              {/* Botón Galería */}
+              {/* Botón Galería - MÚLTIPLES IMÁGENES */}
               <TouchableOpacity
-                onPress={pickImage}
-                className="flex-1 flex-row items-center justify-center bg-gray-900 py-3 rounded-lg"
+                onPress={pickMultipleImages}
+                className="flex-1 flex-row items-center justify-center bg-blue-500 py-3 rounded-lg shadow-sm"
                 disabled={loadingGallery}
               >
                 {loadingGallery ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <>
-                    <Ionicons name="images" size={16} color="#FFFFFF" />
+                    <Ionicons name="images" size={20} color="#FFFFFF" />
                     <Text className="text-white text-sm font-medium ml-2">
-                      Galería
+                      {Platform.OS === 'web' ? 'Seleccionar imágenes' : 'Galería (múltiples)'}
                     </Text>
                   </>
                 )}
@@ -457,7 +576,7 @@ export default function CrearPostScreen() {
                     <ActivityIndicator size="small" color="#111827" />
                   ) : (
                     <>
-                      <Ionicons name="camera" size={16} color="#111827" />
+                      <Ionicons name="camera" size={20} color="#111827" />
                       <Text className="text-gray-900 text-sm font-medium ml-2">Cámara</Text>
                     </>
                   )}
@@ -465,14 +584,24 @@ export default function CrearPostScreen() {
               )}
             </View>
           )}
+
+          {imageCount >= MAX_IMAGENES && (
+            <View className="mt-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+              <Text className="text-yellow-800 text-sm text-center">
+                🎉 ¡Has alcanzado el límite máximo de {MAX_IMAGENES} imágenes!
+              </Text>
+              <Text className="text-yellow-600 text-xs text-center mt-1">
+                Elimina algunas imágenes si quieres agregar más.
+              </Text>
+            </View>
+          )}
         </View>
 
-        {/* RESTO DEL FORMULARIO (DESCRIPCIÓN, TAGS, LINKS...) */}
-
+        {/* DESCRIPCIÓN */}
         <View className="p-4 bg-white mb-3">
           <Text className="text-base font-semibold text-gray-900 mb-2">Descripción</Text>
           <TextInput
-            placeholder="Describe tu estilo..."
+            placeholder="Describe tu estilo, ocasión, o lo que más te guste de este look..."
             value={formData.descripcion}
             onChangeText={(text) => setFormData((prev) => ({ ...prev, descripcion: text.substring(0, 300) }))}
             multiline
@@ -486,6 +615,7 @@ export default function CrearPostScreen() {
           </Text>
         </View>
 
+        {/* TIPO DE LOOK */}
         <View className="p-4 bg-white mb-3">
           <Text className="text-base font-semibold text-gray-900 mb-2">Tipo de look</Text>
           <View className="flex-row gap-2">
@@ -493,18 +623,20 @@ export default function CrearPostScreen() {
               <TouchableOpacity
                 key={etiqueta}
                 onPress={() => setFormData((prev) => ({ ...prev, etiqueta: etiqueta as any }))}
-                className={`flex-1 py-2 rounded-lg items-center ${formData.etiqueta === etiqueta ? 'bg-gray-900' : 'bg-gray-100'
+                className={`flex-1 py-2 rounded-lg items-center ${formData.etiqueta === etiqueta ? 'bg-blue-500' : 'bg-gray-100'
                   }`}
               >
                 <Text className={`text-sm font-medium ${formData.etiqueta === etiqueta ? 'text-white' : 'text-gray-700'
                   }`}>
-                  {etiqueta.charAt(0).toUpperCase() + etiqueta.slice(1)}
+                  {etiqueta === 'propio' ? 'Estilo Propio' : 
+                   etiqueta === 'comprado' ? 'Comprado' : 'Rentado'}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
 
+        {/* ETIQUETAS */}
         <View className="p-4 bg-white mb-3">
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-base font-semibold text-gray-900">Etiquetas</Text>
@@ -531,29 +663,34 @@ export default function CrearPostScreen() {
           </View>
         </View>
 
+        {/* COLECCIONES */}
         <View className="p-4 bg-white mb-3">
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-base font-semibold text-gray-900">Colecciones</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-2">
-              {COLECCIONES_PREDEFINIDAS.map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  onPress={() => handleToggleCollection(item)}
-                  className={`px-4 py-2 rounded-full ${formData.collections.includes(item)
-                    ? 'bg-gray-900'
-                    : 'bg-gray-100 border border-gray-200'
-                    }`}
-                >
-                  <Text className={`text-xs font-medium ${formData.collections.includes(item) ? 'text-white' : 'text-gray-700'
-                    }`}>
-                    {item}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <Text className="text-xs text-gray-500">
+              {formData.collections.length} seleccionadas
+            </Text>
           </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-2">
+            {COLECCIONES_PREDEFINIDAS.map((item) => (
+              <TouchableOpacity
+                key={item}
+                onPress={() => handleToggleCollection(item)}
+                className={`px-4 py-2 rounded-full ${formData.collections.includes(item)
+                  ? 'bg-blue-500'
+                  : 'bg-gray-100 border border-gray-200'
+                  }`}
+              >
+                <Text className={`text-xs font-medium ${formData.collections.includes(item) ? 'text-white' : 'text-gray-700'
+                  }`}>
+                  {item}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
+        {/* ENLACES DE COMPRA */}
         <View className="p-4 bg-white mb-3">
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-base font-semibold text-gray-900">Enlaces de compra</Text>
@@ -582,23 +719,33 @@ export default function CrearPostScreen() {
           )}
         </View>
 
+        {/* BOTÓN DE PUBLICAR */}
         <View className="p-4">
           <TouchableOpacity
             onPress={handleSubmit}
             disabled={loadingSubmit || imageCount === 0}
-            className={`py-4 rounded-lg items-center ${loadingSubmit || imageCount === 0 ? 'bg-gray-300' : 'bg-gray-900'
+            className={`py-4 rounded-lg items-center shadow-sm ${loadingSubmit || imageCount === 0 ? 'bg-gray-300' : 'bg-blue-500'
               }`}
           >
             {loadingSubmit ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <Text className="text-white text-lg font-semibold">Publicar Look</Text>
+              <>
+                <Text className="text-white text-lg font-semibold">
+                  {imageCount === 0 ? 'Selecciona imágenes' : `Publicar Look (${imageCount} ${imageCount === 1 ? 'imagen' : 'imágenes'})`}
+                </Text>
+                {imageCount > 0 && (
+                  <Text className="text-white/80 text-xs mt-1">
+                    Toca para publicar tu contenido
+                  </Text>
+                )}
+              </>
             )}
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      {/* MODALS (TAGS y LINKS) - SIN CAMBIOS */}
+      {/* MODALS (TAGS y LINKS) */}
       <Modal
         animationType="fade"
         transparent
@@ -609,7 +756,7 @@ export default function CrearPostScreen() {
           <View className="bg-white rounded-xl p-5 w-11/12 max-w-sm">
             <Text className="text-lg font-semibold text-gray-900 mb-3">Nueva etiqueta</Text>
             <TextInput
-              placeholder="Ej: vintage, verano..."
+              placeholder="Ej: vintage, verano, casual..."
               value={modalTag.value}
               onChangeText={(text) => setModalTag((prev) => ({ ...prev, value: text }))}
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4"
@@ -626,7 +773,7 @@ export default function CrearPostScreen() {
               <TouchableOpacity
                 onPress={handleAddTag}
                 disabled={!modalTag.value.trim()}
-                className={`flex-1 py-2 rounded-lg ${!modalTag.value.trim() ? 'bg-gray-300' : 'bg-gray-900'}`}
+                className={`flex-1 py-2 rounded-lg ${!modalTag.value.trim() ? 'bg-gray-300' : 'bg-blue-500'}`}
               >
                 <Text className="text-white text-center text-sm font-medium">Agregar</Text>
               </TouchableOpacity>
@@ -645,14 +792,14 @@ export default function CrearPostScreen() {
           <View className="bg-white rounded-xl p-5 w-11/12 max-w-sm">
             <Text className="text-lg font-semibold text-gray-900 mb-3">Enlace de compra</Text>
             <TextInput
-              placeholder="Producto"
+              placeholder="Nombre del producto o tienda"
               value={modalLink.nombre}
               onChangeText={(text) => setModalLink((prev) => ({ ...prev, nombre: text }))}
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-3"
               placeholderTextColor="#9CA3AF"
             />
             <TextInput
-              placeholder="URL"
+              placeholder="URL del producto"
               value={modalLink.url}
               onChangeText={(text) => setModalLink((prev) => ({ ...prev, url: text }))}
               className="p-3 border border-gray-200 rounded-lg text-gray-900 text-sm mb-4"
@@ -670,7 +817,7 @@ export default function CrearPostScreen() {
               <TouchableOpacity
                 onPress={handleAddLink}
                 disabled={!modalLink.nombre.trim() || !modalLink.url.trim()}
-                className={`flex-1 py-2 rounded-lg ${!modalLink.nombre.trim() || !modalLink.url.trim() ? 'bg-gray-300' : 'bg-gray-900'
+                className={`flex-1 py-2 rounded-lg ${!modalLink.nombre.trim() || !modalLink.url.trim() ? 'bg-gray-300' : 'bg-blue-500'
                   }`}
               >
                 <Text className="text-white text-center text-sm font-medium">Agregar</Text>

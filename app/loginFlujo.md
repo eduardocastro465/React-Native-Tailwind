@@ -214,3 +214,19 @@ React Native guarda token y usuario en AsyncStorage.
 
 
 Maneja cuentas bloqueadas con countdown, errores y cancelaciones de usuario.
+
+
+
+
+<!-- 
+flujo completo:
+
+Autentica con Google (Firebase) y obtiene uid, email, displayName y photoURL.
+
+Envía estos datos a tu API Node.js usando signInWithSocial de AuthService.
+
+Tu API valida o crea el usuario, genera JWT y devuelve { token, usuario }.
+
+React Native guarda token y usuario en AsyncStorage.
+
+ -->

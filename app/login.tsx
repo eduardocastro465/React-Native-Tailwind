@@ -53,7 +53,7 @@ const LoginScreen: React.FC = () => {
   const attemptsRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
 
-  // 🔥 GOOGLE LOGIN NATIVO (Firebase)
+  // GOOGLE LOGIN NATIVO (Firebase)
   const loginWithGoogle = async () => {
     if (isLocked) {
       setErrorMessage(`Demasiados intentos. Intenta en ${remainingTime} s.`);
@@ -92,7 +92,7 @@ const LoginScreen: React.FC = () => {
         photoURL: userCredential.user.photoURL,
       };
 
-      // 🔥 Llamada a tu API usando AuthService
+      // Llamada a tu API usando AuthService
       const response: any = await AuthService.signInWithSocial(usuario);
 
       if (!response.token || !response.usuario) {

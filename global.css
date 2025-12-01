@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+
+
+.hero-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 5rem; /* equivalente a text-5xl */
+  color: #5c4a3a;
+}
+
+.hero-subtitle {
+  font-family: 'Poppins', sans-serif;
+  font-size: 2rem; /* text-2xl */
+  color: #4a4a4a;
+}
+
+.hero-text {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.875rem; /* text-sm */
+  color: #6b6b6b;
+}

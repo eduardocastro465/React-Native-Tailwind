@@ -26,9 +26,10 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { environment } from "../src/environments/environment";
 import { jwtDecode } from "jwt-decode";
-import useLogout from "./hooks/useLogout";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import auth from "@react-native-firebase/auth";
+import { useFonts } from 'expo-font';
+
 // --- DIMENSIONES Y CONSTANTES ---
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const COLUMN_GAP = 16;
@@ -65,7 +66,8 @@ interface Like {
 interface ApiPost {
   _id: string;
   usuariaId: string;
-  imagenUrl: string;
+  imagenUrl?: string;
+  imagenUrls?: string[];
   descripcion: string;
   etiqueta: string;
   aprobado: boolean;
@@ -85,7 +87,7 @@ interface Post {
   user_id: string;
   user_name: string;
   user_avatar: string;
-  image_url: string;
+  image_urls: string[];
   description: string;
   likes_count: number;
   comments_count: number;
@@ -94,8 +96,8 @@ interface Post {
   user_has_saved: boolean;
   category?: string;
   size?: "small" | "medium" | "large" | "xlarge";
-  aspectRatio?: number;
   etiqueta?: string;
+  aspectRatio?: number;
 }
 
 interface UserData {
@@ -231,12 +233,17 @@ const transformApiPostToAppPost = (
     (like) => like.usuariaId === currentUserId
   );
 
+  // Manejar imágenes: usar imagenUrls si existe, sino usar imagenUrl
+  const imageUrls = apiPost.imagenUrls 
+    ? apiPost.imagenUrls 
+    : (apiPost.imagenUrl ? [apiPost.imagenUrl] : []);
+
   return {
     _id: apiPost._id,
     user_id: apiPost.usuariaId,
     user_name: apiPost.usuaria.nombre,
     user_avatar: apiPost.usuaria.fotoDePerfil,
-    image_url: apiPost.imagenUrl,
+    image_urls: imageUrls,
     description: apiPost.descripcion,
     likes_count: apiPost.likesCount || 0,
     comments_count: apiPost.comentariosCount || 0,
@@ -261,8 +268,15 @@ const PostCard: React.FC<{
   const [isDoubleTap, setIsDoubleTap] = useState(false);
   const [imageHeight, setImageHeight] = useState(CARD_WIDTH * 1.2);
   const lastTapRef = useRef<number | null>(null);
+  const [localPost, setLocalPost] = useState(post); // Estado local para el post
 
   const handleLike = () => {
+    // Actualización local sin recargar toda la vista
+    setLocalPost(prev => ({
+      ...prev,
+      user_has_liked: !prev.user_has_liked,
+      likes_count: prev.user_has_liked ? prev.likes_count - 1 : prev.likes_count + 1,
+    }));
     onLike(post._id);
   };
 
@@ -286,7 +300,7 @@ const PostCard: React.FC<{
     const now = Date.now();
     if (lastTapRef.current && now - lastTapRef.current < 500) {
       setIsDoubleTap(true);
-      if (!post.user_has_liked) handleLike();
+      if (!localPost.user_has_liked) handleLike();
       setTimeout(() => setIsDoubleTap(false), 600);
     }
     lastTapRef.current = now;
@@ -306,7 +320,7 @@ const PostCard: React.FC<{
     }
 
     try {
-      const uri = post.image_url;
+      const uri = localPost.image_urls[0];
       if (uri) {
         Image.getSize(
           uri,
@@ -322,7 +336,6 @@ const PostCard: React.FC<{
       console.log("Error en handleImageLoad:", e);
     }
   };
-
 
   return (
     <View
@@ -342,11 +355,11 @@ const PostCard: React.FC<{
       {/* HEADER */}
       <View className="flex-row items-center justify-between p-3 pb-2">
         <TouchableOpacity
-          onPress={() => onProfilePress(post.user_id)}
+          onPress={() => onProfilePress(localPost.user_id)}
           className="flex-row items-center flex-1"
         >
           <Image
-            source={{ uri: post.user_avatar }}
+            source={{ uri: localPost.user_avatar }}
             className="w-6 h-6 rounded-full bg-gray-200"
             onError={(e) =>
               console.log("Error loading avatar:", e.nativeEvent.error)
@@ -357,12 +370,12 @@ const PostCard: React.FC<{
               className="text-[10px] font-semibold text-gray-900"
               numberOfLines={1}
             >
-              {post.user_name}
+              {localPost.user_name}
             </Text>
             <View className="flex-row items-center gap-1 mt-0.5">
-              {post.category && (
+              {localPost.category && (
                 <Text className="text-[8px] text-gray-500 uppercase tracking-wider">
-                  {post.category}
+                  {localPost.category}
                 </Text>
               )}
               <Text className="text-[8px] text-gray-400">• {getTimeAgo()}</Text>
@@ -377,16 +390,20 @@ const PostCard: React.FC<{
       {/* IMAGE WITH DOUBLE TAP */}
       <TouchableOpacity activeOpacity={1} onPress={handleDoubleTap}>
         <View className="relative">
-          <Image
-            source={{ uri: post.image_url }}
-            style={{ height: imageHeight, width: CARD_WIDTH }}
-            className="bg-gray-100"
-            resizeMode="cover"
-            onLoad={handleImageLoad}
-            onError={(e) =>
-              console.log("Error loading image:", e.nativeEvent.error)
-            }
-          />
+          {localPost.image_urls && localPost.image_urls.length > 0 ? (
+            <Image
+              source={{ uri: localPost.image_urls[0] }}
+              style={{ height: imageHeight, width: CARD_WIDTH }}
+              className="bg-gray-100"
+              resizeMode="cover"
+              onLoad={handleImageLoad}
+              onError={(e) =>
+                console.log("Error loading image:", e.nativeEvent.error)
+              }
+            />
+          ) : (
+            <View style={{ height: imageHeight, width: CARD_WIDTH, backgroundColor: "#f3f4f6" }} />
+          )}
 
           {isDoubleTap && (
             <View className="absolute inset-0 items-center justify-center bg-black/20">
@@ -405,23 +422,23 @@ const PostCard: React.FC<{
             className="flex-row items-center mr-3"
           >
             <Ionicons
-              name={post.user_has_liked ? "heart" : "heart-outline"}
+              name={localPost.user_has_liked ? "heart" : "heart-outline"}
               size={16}
-              color={post.user_has_liked ? "#EF4444" : "#000000"}
+              color={localPost.user_has_liked ? "#EF4444" : "#000000"}
             />
             <Text className="text-[10px] font-semibold text-gray-900 ml-1">
-              {post.likes_count}
+              {localPost.likes_count}
             </Text>
           </TouchableOpacity>
 
           {/* COMMENT BUTTON */}
           <TouchableOpacity
-            onPress={() => onComment(post._id)}
+            onPress={() => onComment(localPost._id)}
             className="flex-row items-center mr-3"
           >
             <Ionicons name="chatbubble-outline" size={16} color="#000000" />
             <Text className="text-[10px] font-semibold text-gray-900 ml-1">
-              {post.comments_count}
+              {localPost.comments_count}
             </Text>
           </TouchableOpacity>
 
@@ -432,9 +449,9 @@ const PostCard: React.FC<{
         </View>
 
         {/* SAVE BUTTON */}
-        <TouchableOpacity onPress={() => onSave(post._id)}>
+        <TouchableOpacity onPress={() => onSave(localPost._id)}>
           <Ionicons
-            name={post.user_has_saved ? "bookmark" : "bookmark-outline"}
+            name={localPost.user_has_saved ? "bookmark" : "bookmark-outline"}
             size={16}
             color="#000000"
           />
@@ -443,20 +460,20 @@ const PostCard: React.FC<{
 
       {/* DESCRIPTION & COMMENTS */}
       <View className="p-3 pt-0">
-        <TouchableOpacity onPress={() => onPostPress(post)}>
-          {post.description && (
+        <TouchableOpacity onPress={() => onPostPress(localPost)}>
+          {localPost.description && (
             <Text
               className="text-[10px] text-gray-700 leading-3.5"
               numberOfLines={2}
             >
-              <Text className="font-semibold">{post.user_name} </Text>
-              {post.description}
+              <Text className="font-semibold">{localPost.user_name} </Text>
+              {localPost.description}
             </Text>
           )}
 
-          {post.comments_count > 0 && (
+          {localPost.comments_count > 0 && (
             <Text className="text-[9px] text-gray-500 mt-1">
-              Ver {post.comments_count} comentarios
+              Ver {localPost.comments_count} comentarios
             </Text>
           )}
         </TouchableOpacity>
@@ -465,75 +482,95 @@ const PostCard: React.FC<{
   );
 };
 
-// ... (HeroSection, PromoCard, SeccionOption, MasonryLayout se mantienen igual)
-const HeroSection = () => {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(1.1)).current;
-  const textSlideAnim = useRef(new Animated.Value(80)).current;
+const HeroImageSection = () => {
+  return (
+    <View className={`flex-1 justify-center items-center  p-6`}>
+      <Image
+        source={require('../assets/imgs-heros/img1.png')}
+        className={`w-full h-64  rounded-2xl`}
+        resizeMode="stretch"
+      />
+    </View>
+  );
+};
 
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 1500,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 2000,
-        useNativeDriver: true,
-      }),
-      Animated.timing(textSlideAnim, {
-        toValue: 0,
-        duration: 1200,
-        delay: 600,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
+const HeroImageSection2 = () => {
+  return (
+    <View className={`flex-1 justify-center items-center  p-6`}>
+      <Image
+        source={require('../assets/imgs-heros/img3.png')}
+        className={`w-full h-72  rounded-4xl`}
+        resizeMode="contain"
+      />
+    </View>
+  );
+};
+
+const HeroSection = () => {
+  // Cargar fuente personalizada
+  const [fontsLoaded] = useFonts({
+    'HaveYouEaten': require('../assets/fonts/MatildaDestinee-Regular.ttf'),
+  });
+
+  if (!fontsLoaded) return null;
 
   return (
-    <View className="h-[50vh] flex-row bg-[#f6f2e7] mt-12 mx-0 rounded-2xl overflow-hidden">
-      <Animated.View
-        style={[
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: textSlideAnim }],
-          },
-        ]}
-        className="flex-1 justify-center px-8"
-      >
-        <Text className="text-black text-5xl font-light tracking-widest mb-5">
-          ATELIER
+    <View className="h-[50vh] flex-row bg-[#f6f2e7] mt-1 mx-0 rounded-2xl overflow-hidden p-6">
+      {/* Contenedor de texto más ancho */}
+      <View className="flex-[1.2] justify-center">
+        {/* Título principal con HaveYouEaten */}
+        <Text
+          style={{
+            fontFamily: 'HaveYouEaten',
+            fontSize: 100,
+            color: '#5a4b39',
+            lineHeight: 120,
+          }}
+        >
+          Atelier
         </Text>
 
-        <Text className="text-gray-800 text-2xl font-light tracking-widest mb-3">
+        {/* Subtítulo más grande y elegante */}
+        <Text
+          style={{
+            fontSize: 20,
+            color: '#4a4a4a',
+            fontWeight: '400',
+          }}
+        >
           venta y renta de vestidos
         </Text>
 
-        <Text className="text-gray-600 text-sm font-light tracking-wider">
+        {/* Texto descriptivo */}
+        <Text
+          style={{
+            fontSize: 18,
+            color: '#6b6b6b',
+            marginTop: 1,
+          }}
+        >
           La esencia de la elegancia moderna
         </Text>
-      </Animated.View>
+      </View>
 
-      <View className="flex-1 relative">
-        <Animated.Image
+      {/* Imagen ajustada */}
+      <View className="flex-1 relative justify-center items-end">
+        <Image
           source={{
-            uri: "https://res.cloudinary.com/dvvhnrvav/image/upload/v1746397789/shlcavwsffgxemctxdml.png",
+            uri: 'https://res.cloudinary.com/dvvhnrvav/image/upload/v1746397789/shlcavwsffgxemctxdml.png',
           }}
-          style={[
-            {
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
-            },
-          ]}
-          className="w-full h-[90%] rounded-lg self-center"
+          style={{
+            width: '95%',
+            height: '85%',
+            borderRadius: 24,
+          }}
           resizeMode="cover"
         />
       </View>
     </View>
   );
 };
+
 const PromoCard: React.FC = () => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -668,15 +705,18 @@ const SeccionOption: React.FC = () => {
 
   const handleNavigation = (path: string) => router.push(path);
 
-  // ✅ Función de cierre de sesión
+  // ✅ Función de cierre de sesión MEJORADA para no recargar posts
   const logout = async () => {
     try {
+      // Limpiar datos de autenticación sin afectar el estado de posts
       await auth().signOut();
       const currentUser = await GoogleSignin.getCurrentUser();
       if (currentUser) await GoogleSignin.signOut();
       await AsyncStorage.removeItem("token");
       await AsyncStorage.removeItem("userData");
-      router.push("/login");
+      
+      // Redirigir sin recargar la vista actual
+      router.replace("/");
     } catch (error) {
       console.log("Error al cerrar sesión:", error);
     }
@@ -730,13 +770,12 @@ const SeccionOption: React.FC = () => {
             );
           })}
 
-          {/* 🔴 BOTÓN DE CERRAR SESIÓN */}
+          {/* 🔴 BOTÓN DE CERRAR SESIÓN - MEJORADO */}
           <TouchableOpacity
-            onPress={logout} // ✅ Llamamos la función directamente
+            onPress={logout} // ✅ Llamamos la función mejorada
             activeOpacity={0.85}
-            className="flex-row items-center justify-center gap-3 p-5 bg-white border border-gray-200 rounded-xl mt-6"
+            className="flex-row items-center justify-center gap-3 p-5 bg-white rounded-none mt-6"
             style={{
-              shadowColor: "#000",
               shadowOffset: { width: 0, height: 3 },
               shadowOpacity: 0.12,
               shadowRadius: 6,
@@ -830,6 +869,7 @@ const MasonryLayout = ({
     </View>
   );
 };
+
 const PostDetailModal: React.FC<{
   post: Post | null;
   onClose: () => void;
@@ -839,37 +879,58 @@ const PostDetailModal: React.FC<{
   onProfilePress: (userId: string) => void;
 }> = ({ post, onClose, onLike, onSave, onComment, onProfilePress }) => {
   const [imageHeight, setImageHeight] = useState(SCREEN_WIDTH * 1.2);
-  const router = useRouter();
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [localPost, setLocalPost] = useState(post); // Estado local para el post
 
   useEffect(() => {
-    if (post?.image_url) {
-      Image.getSize(post.image_url, (width, height) => {
+    if (post) {
+      setLocalPost(post);
+    }
+  }, [post]);
+
+  useEffect(() => {
+    if (localPost?.image_urls && localPost.image_urls.length > 0) {
+      Image.getSize(localPost.image_urls[currentImageIndex], (width, height) => {
         const aspectRatio = height / width;
         setImageHeight(SCREEN_WIDTH * aspectRatio);
       });
     }
-  }, [post?.image_url]);
+  }, [localPost?.image_urls, currentImageIndex]);
 
   const handleLike = async () => {
-    if (!post) return;
-    await onLike(post._id);
+    if (!localPost) return;
+    
+    // Actualización local sin recargar toda la vista
+    setLocalPost(prev => prev ? {
+      ...prev,
+      user_has_liked: !prev.user_has_liked,
+      likes_count: prev.user_has_liked ? prev.likes_count - 1 : prev.likes_count + 1,
+    } : null);
+    
+    await onLike(localPost._id);
   };
 
   const handleSave = async () => {
-    if (!post) return;
-    await onSave(post._id);
+    if (!localPost) return;
+    
+    // Actualización local
+    setLocalPost(prev => prev ? {
+      ...prev,
+      user_has_saved: !prev.user_has_saved,
+    } : null);
+    
+    await onSave(localPost._id);
   };
 
-  // FUNCIÓN DE COMPARTIR EN MODAL CORREGIDA
   const handleShare = async () => {
-    if (!post) return;
-    await handleShare(post);
+    if (!localPost) return;
+    await handleShare(localPost);
   };
 
   const getTimeAgo = () => {
-    if (!post) return "";
+    if (!localPost) return "";
     const diff = Math.floor(
-      (Date.now() - new Date(post.created_at).getTime()) / 1000
+      (Date.now() - new Date(localPost.created_at).getTime()) / 1000
     );
     if (diff < 60) return "ahora";
     if (diff < 3600) return `${Math.floor(diff / 60)}m`;
@@ -879,121 +940,166 @@ const PostDetailModal: React.FC<{
   };
 
   const handleProfileNavigate = () => {
-    if (!post) return;
+    if (!localPost) return;
     onClose();
-    onProfilePress(post.user_id);
+    onProfilePress(localPost.user_id);
   };
 
   const handleCommentNavigate = () => {
-    if (!post) return;
+    if (!localPost) return;
     onClose();
-    onComment(post._id);
+    onComment(localPost._id);
   };
 
-  if (!post) return null;
+  const handlePrevImage = () => {
+    setCurrentImageIndex((prevIndex) => {
+      if (localPost?.image_urls && localPost.image_urls.length > 0) {
+        return prevIndex > 0 ? prevIndex - 1 : localPost.image_urls.length - 1;
+      }
+      return 0;
+    });
+  };
+
+  const handleNextImage = () => {
+    setCurrentImageIndex((prevIndex) => {
+      if (localPost?.image_urls && localPost.image_urls.length > 0) {
+        return prevIndex < localPost.image_urls.length - 1 ? prevIndex + 1 : 0;
+      }
+      return 0;
+    });
+  };
+
+  if (!localPost) return null;
 
   return (
     <Modal
-      visible={true}
       animationType="slide"
-      transparent={false}
+      transparent={true}
       onRequestClose={onClose}
     >
-      <View className="flex-1 bg-white">
-        <View className="flex-row items-center justify-between p-4 border-b border-gray-100">
-          <TouchableOpacity
-            onPress={handleProfileNavigate}
-            className="flex-row items-center flex-1"
-          >
-            <Image
-              source={{ uri: post.user_avatar }}
-              className="w-9 h-9 rounded-full bg-gray-200"
-            />
-            <View className="ml-3">
-              <Text className="text-sm font-semibold text-gray-900">
-                {post.user_name}
-              </Text>
-              <Text className="text-xs text-gray-500">{getTimeAgo()}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <View className="flex-row items-center gap-2">
-            {post.category && (
-              <View className="bg-gray-100 px-2 py-1 rounded-full">
-                <Text className="text-xs text-gray-600 font-medium">
-                  {post.category}
+      <View className="flex-1 items-center justify-center bg-black/40 px-3">
+        {/* CONTENEDOR ELEGANTE */}
+        <View
+          className="w-full max-w-lg rounded-3xl p-6 bg-white"
+          style={{ height: "60%" }}
+        >
+          {/* HEADER */}
+          <View className="flex-row items-center justify-between border-b border-gray-200 pb-4">
+            <TouchableOpacity
+              onPress={handleProfileNavigate}
+              className="flex-row items-center"
+            >
+              <Image
+                source={{ uri: localPost.user_avatar }}
+                className="w-10 h-10 rounded-full bg-gray-200"
+              />
+              <View className="ml-3">
+                <Text className="text-sm font-semibold text-gray-900">
+                  {localPost.user_name}
                 </Text>
+                <Text className="text-xs text-gray-500">{getTimeAgo()}</Text>
+              </View>
+            </TouchableOpacity>
+
+            <View className="flex-row items-center gap-2">
+              {localPost.category && (
+                <View className="bg-gray-100 px-3 py-1 rounded-full">
+                  <Text className="text-xs text-gray-700 font-medium">
+                    {localPost.category}
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity onPress={onClose} className="p-2">
+                <Feather name="x" size={22} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* SCROLL DEL CONTENIDO */}
+          <ScrollView className="flex-1 mt-3">
+            <View className="relative">
+              {localPost.image_urls && localPost.image_urls.length > 0 ? (
+                <Image
+                  source={{ uri: localPost.image_urls[currentImageIndex] }}
+                  className="w-full h-96 bg-gray-100 rounded-2xl mb-5"
+                  resizeMode="cover"
+                />
+              ) : (
+                <View className="w-full h-96 bg-gray-100 rounded-2xl mb-5" />
+              )}
+              {localPost.image_urls.length > 1 && (
+                <View className="absolute bottom-2 left-2 right-2 flex-row justify-between">
+                  <TouchableOpacity onPress={handlePrevImage} className="p-2">
+                    <Ionicons name="chevron-back-outline" size={24} color="#fff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleNextImage} className="p-2">
+                    <Ionicons name="chevron-forward-outline" size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            <View className="flex-row items-center justify-between pb-4">
+              <View className="flex-row items-center gap-4">
+                {/* LIKE */}
+                <TouchableOpacity
+                  onPress={handleLike}
+                  className="flex-row items-center gap-1"
+                >
+                  <Ionicons
+                    name={localPost.user_has_liked ? "heart" : "heart-outline"}
+                    size={22}
+                    color={localPost.user_has_liked ? "#EF4444" : "#6B7280"}
+                  />
+                  <Text
+                    className={`text-sm font-medium ${localPost.user_has_liked ? "text-red-500" : "text-gray-700"
+                      }`}
+                  >
+                    {localPost.likes_count}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* SHARE */}
+                <TouchableOpacity
+                  onPress={handleShare}
+                  className="flex-row items-center gap-1"
+                >
+                  <Ionicons name="share-outline" size={20} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+
+              {/* SAVE */}
+              <TouchableOpacity onPress={handleSave}>
+                <Ionicons
+                  name={localPost.user_has_saved ? "bookmark" : "bookmark-outline"}
+                  size={22}
+                  color={localPost.user_has_saved ? "#111827" : "#6B7280"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* DESCRIPCIÓN */}
+            <View className="pb-4">
+              <Text className="text-sm text-gray-900 leading-6">
+                <Text className="font-semibold">{localPost.user_name} </Text>
+                {localPost.description}
+              </Text>
+            </View>
+
+            {/* ETIQUETA */}
+            {localPost.etiqueta && (
+              <View className="pb-4">
+                <View className="bg-gray-100 px-3 py-1.5 rounded-full self-start">
+                  <Text className="text-xs font-medium text-gray-700">
+                    #{localPost.etiqueta}
+                  </Text>
+                </View>
               </View>
             )}
-            <TouchableOpacity onPress={onClose} className="p-2">
-              <Feather name="x" size={22} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
+
+          </ScrollView>
         </View>
-
-        <ScrollView className="flex-1">
-          <Image
-            source={{ uri: post.image_url }}
-            style={{ width: SCREEN_WIDTH, height: imageHeight }}
-            className="bg-gray-100"
-            resizeMode="contain"
-          />
-
-          <View className="flex-row items-center justify-between p-4">
-            <View className="flex-row items-center gap-4">
-              <TouchableOpacity
-                onPress={handleLike}
-                className="flex-row items-center gap-1"
-              >
-                <Ionicons
-                  name={post.user_has_liked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={post.user_has_liked ? "#EF4444" : "#6B7280"}
-                />
-                <Text
-                  className={`text-sm font-medium ${post.user_has_liked ? "text-red-500" : "text-gray-700"}`}
-                >
-                  {post.likes_count}
-                </Text>
-              </TouchableOpacity>
-
-              {/* BOTÓN COMPARTIR EN MODAL - CORREGIDO */}
-              <TouchableOpacity
-                onPress={handleShare}
-                className="flex-row items-center gap-1"
-              >
-                <Ionicons name="share-outline" size={20} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity onPress={handleSave}>
-              <Ionicons
-                name={post.user_has_saved ? "bookmark" : "bookmark-outline"}
-                size={20}
-                color={post.user_has_saved ? "#000000" : "#6B7280"}
-              />
-            </TouchableOpacity>
-          </View>
-
-          <View className="px-4 pb-4">
-            <Text className="text-sm text-gray-900 leading-5">
-              <Text className="font-semibold">{post.user_name} </Text>
-              {post.description}
-            </Text>
-          </View>
-
-          {post.etiqueta && (
-            <View className="px-4 pb-4">
-              <View className="bg-black/5 px-3 py-1.5 rounded-full self-start">
-                <Text className="text-xs font-medium text-gray-700">
-                  #{post.etiqueta}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          <View className="h-px bg-gray-100 mx-4 my-2" />
-        </ScrollView>
       </View>
     </Modal>
   );
@@ -1018,7 +1124,6 @@ const Home: React.FC = () => {
           console.log("User ID cargado desde token:", userId);
         } else {
           console.log("No se pudo obtener el ID del usuario desde el token");
-          // También intentamos obtenerlo de userData como fallback
           const userData = await getUserData();
           if (userData && userData._id) {
             setCurrentUserId(userData._id);
@@ -1050,12 +1155,18 @@ const Home: React.FC = () => {
       const apiPosts = await apiService.getApprovedPosts();
       console.log("Posts received:", apiPosts.length);
 
+      // Transformar posts y FILTRAR los del usuario actual
       const transformedPosts = apiPosts.map((apiPost) =>
         transformApiPostToAppPost(apiPost, currentUserId)
       );
-      console.log("Transformed posts:", transformedPosts.length);
+      
+      // 🔥 FILTRO: Excluir posts del usuario actual
+      const filteredPosts = transformedPosts.filter((post) => post.user_id !== currentUserId);
+      
+      console.log("Transformed posts (filtered):", filteredPosts.length);
+      console.log("Posts del usuario actual excluidos:", transformedPosts.length - filteredPosts.length);
 
-      setPosts(transformedPosts);
+      setPosts(filteredPosts);
     } catch (err) {
       console.error("Error in fetchAllData:", err);
       setError("Error al cargar los posts");
@@ -1076,75 +1187,36 @@ const Home: React.FC = () => {
     setRefreshing(false);
   }, [currentUserId]);
 
-  // Función de like corregida
+  // Función de like MEJORADA para no recargar la vista
   const handleLikePost = useCallback(
     async (postId: string) => {
-      if (!currentUserId) {
-        console.error("No hay usuario autenticado");
-        return;
-      }
+      if (!currentUserId) return;
 
-      setPosts((prevPosts) => {
-        return prevPosts.map((post) => {
-          if (post._id === postId) {
-            const newLikedState = !post.user_has_liked;
-            const newLikesCount = newLikedState
-              ? post.likes_count + 1
-              : post.likes_count - 1;
+      // Solo hacemos la llamada API en segundo plano
+      // NO actualizamos el estado global para evitar recargas
+      try {
+        const post = posts.find(p => p._id === postId);
+        if (post) {
+          const ok = post.user_has_liked
+            ? await apiService.unlikePost(postId, currentUserId)
+            : await apiService.likePost(postId, currentUserId);
 
-            // Llamar a la API en segundo plano
-            (async () => {
-              try {
-                const success = post.user_has_liked
-                  ? await apiService.unlikePost(postId, currentUserId)
-                  : await apiService.likePost(postId, currentUserId);
-
-                if (!success) {
-                  // Revertir si la API falla
-                  setPosts((currentPosts) =>
-                    currentPosts.map((p) =>
-                      p._id === postId
-                        ? {
-                          ...p,
-                          user_has_liked: post.user_has_liked,
-                          likes_count: post.likes_count,
-                        }
-                        : p
-                    )
-                  );
-                  console.log("Error al actualizar like");
-                }
-              } catch (error) {
-                setPosts((currentPosts) =>
-                  currentPosts.map((p) =>
-                    p._id === postId
-                      ? {
-                        ...p,
-                        user_has_liked: post.user_has_liked,
-                        likes_count: post.likes_count,
-                      }
-                      : p
-                  )
-                );
-                console.error("Error de red:", error);
-              }
-            })();
-
-            return {
-              ...post,
-              user_has_liked: newLikedState,
-              likes_count: newLikesCount,
-            };
+          if (!ok) {
+            console.error("Error en la API de like");
           }
-          return post;
-        });
-      });
+        }
+      } catch (err) {
+        console.error("Error en handleLikePost:", err);
+      }
+      // NO actualizamos el estado global - cada PostCard maneja su propio estado
     },
-    [currentUserId]
+    [currentUserId, posts]
   );
 
+  // Función de save MEJORADA para no recargar la vista
   const handleSavePost = useCallback(async (postId: string) => {
     console.log("Guardar post:", postId);
+    // Solo log, no actualizar estado global
   }, []);
 
   const handleProfilePress = (userId: string) => {
@@ -1167,6 +1239,7 @@ const Home: React.FC = () => {
     <>
       <HeroSection />
       <PromoCard />
+      <HeroImageSection />
       {currentUserId && (
         <MasonryLayout
           posts={posts}
@@ -1177,6 +1250,7 @@ const Home: React.FC = () => {
           onPostPress={handlePostPress}
         />
       )}
+      <HeroImageSection2 />
       <SeccionOption />
     </>
   );

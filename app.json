@@ -5,7 +5,7 @@
     "owner": "driftspotky",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/atr.png",
+    "icon": "../assets/atr.png",
     "scheme": "ateliermovil",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -55,7 +55,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-font"
     ],
     "web": {
       "output": "static",
